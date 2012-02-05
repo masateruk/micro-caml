@@ -182,4 +182,5 @@ let f e =
   (try unify (Type.App(Type.Unit, [])) (g M.empty e)
     with Unify _ -> failwith "top level does not have type unit");
   extenv := M.map deref_typ !extenv;
-  (deref_term e) 
+  deref_term e
+

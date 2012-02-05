@@ -4,6 +4,7 @@ PROGRAM = $(PWD)/../ucaml
 TESTS = $(shell ls *.ml)
 TRASH = *.log *.c *.out *.cmo *.cmi
 
+.PHONY:all do_test clean
 .PRECIOUS: $(patsubst %.ml, %.c, $(TESTS))
 
 all: clean do_test

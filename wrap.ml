@@ -1,5 +1,3 @@
-(* type inference/reconstruction *)
-
 open Syntax
 
 module MapSet =
