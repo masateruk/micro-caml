@@ -9,32 +9,21 @@ let rec pp_list = function
 let counter = ref 0
 let genid s =
   incr counter;
-  Printf.sprintf "%s_%d_" s !counter
+  Printf.sprintf "%s%d" s !counter
+  
+let rec id_of_typ = function
+  | Type.Var _ -> "v" 
+  | Type.App(tycon, _) -> id_of_tycon tycon
+  | Type.Poly(_, t) -> id_of_typ t
+  | _ -> assert false
 
-let rec string_of_typ = function
-  | Type.Unit -> "unit"
-  | Type.Bool -> "bool"
-  | Type.Int -> "int"
-  | Type.Fun _ -> "function"
-  | Type.Var _ -> "var"
-  | Type.Closure _ -> "closure"
-  | Type.Record _ -> "record"
-  | Type.Name(s, _) -> s
-
-let rec ml_of_typ = function
-  | Type.Unit -> "()"
-  | Type.Bool -> "bool"
-  | Type.Int -> "int"
-  | Type.Fun _ -> "fun"
-  | Type.Var _ -> assert false
-  | Type.Closure _ -> assert false
-  | Type.Record _ -> assert false
-  | Type.Name _ -> assert false
+and id_of_tycon = function
+    | Type.Unit -> "u"
+    | Type.Bool -> "b"
+    | Type.Int -> "n"
+    | Type.Arrow -> "a"
+    | Type.TyFun(_, t) -> id_of_typ t
 
 let gentmp typ =
   incr counter;
-  Printf.sprintf "tmp_%s%d" (Type.id_of_typ typ) !counter
-
-let gentype typ = 
-  incr counter;
-  Printf.sprintf "%s_%d_t" (Type.id_of_typ typ) !counter
+  Printf.sprintf "tmp_%s%d" (id_of_typ typ) !counter

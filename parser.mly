@@ -1,7 +1,7 @@
 %{
 (* parserが利用する変数、関数、型などの定義 *)
 open Syntax
-let addtyp x = (x, Type.gentyp ())
+let addtyp x = (x, Type.Meta(Type.newmetavar ()))
 %}
 
 /* 字句を表すデータ型の定義 (caml2html: parser_token) */
@@ -13,6 +13,7 @@ let addtyp x = (x, Type.gentyp ())
 %token PLUS
 %token AST
 %token SLASH
+%token CONS
 %token EQUAL
 %token LESS_GREATER
 %token LESS_EQUAL
@@ -26,8 +27,11 @@ let addtyp x = (x, Type.gentyp ())
 %token LET
 %token IN
 %token REC
+%token SEMICOLON
 %token LPAREN
 %token RPAREN
+%token LSQUARE_BRANKET
+%token RSQUARE_BRANKET
 %token EOF
 
 /* 優先順位とassociativityの定義（低い方から高い方へ） (caml2html: parser_prior) */
@@ -37,19 +41,22 @@ let addtyp x = (x, Type.gentyp ())
 %right LESS_MINUS
 %left COMMA
 %left EQUAL LESS_GREATER LESS GREATER LESS_EQUAL GREATER_EQUAL
+%right CONS
 %left PLUS MINUS
 %left AST SLASH
 %right prec_unary_minus
 %left prec_app
 
 /* 開始記号の定義 */
-%type <Syntax.t> exp
-%start exp
+%type <Syntax.t> sequence
+%start sequence
 
 %%
 
 simple_exp: /* 括弧をつけなくても関数の引数になれる式 (caml2html: parser_simple) */
 | LPAREN exp RPAREN
+    { $2 }
+| LPAREN sequence RPAREN
     { $2 }
 | LPAREN RPAREN
     { Unit }
@@ -59,6 +66,8 @@ simple_exp: /* 括弧をつけなくても関数の引数になれる式 (caml2html: parser_simple)
     { Int($1) }
 | IDENT
     { Var($1) }
+| LSQUARE_BRANKET list RSQUARE_BRANKET
+    { List.fold_right (fun x xs -> Cons(x, xs)) $2 (Nil(Type.Meta(Type.newmetavar ()))) }
 
 exp: /* 一般の式 (caml2html: parser_exp) */
 | simple_exp
@@ -77,6 +86,8 @@ exp: /* 一般の式 (caml2html: parser_exp) */
     { Mul($1, $3) }
 | exp SLASH exp
     { Div($1, $3) }
+| exp CONS exp
+    { Cons($1, $3) }
 | exp EQUAL exp
     { Eq($1, $3) }
 | exp LESS_GREATER exp
@@ -92,12 +103,6 @@ exp: /* 一般の式 (caml2html: parser_exp) */
 | IF exp THEN exp ELSE exp
     %prec prec_if
     { If($2, $4, $6) }
-| LET IDENT EQUAL exp IN exp
-    %prec prec_let
-    { Let(addtyp $2, $4, $6) }
-| LET REC fundef IN exp
-    %prec prec_let
-    { LetRec($3, $5) }
 | exp actual_args
     %prec prec_app
     { App($1, $2) }
@@ -107,8 +112,20 @@ exp: /* 一般の式 (caml2html: parser_exp) */
 	   (Parsing.symbol_start ())
 	   (Parsing.symbol_end ())) }
 
+sequence: 
+| exp
+    { $1 }
+| LET IDENT EQUAL sequence IN sequence
+    %prec prec_let
+    { Let(addtyp $2, $4, $6) }
+| LET REC fundef IN sequence
+    %prec prec_let
+    { LetRec($3, $5) }
+| exp SEMICOLON sequence
+    { Let((Id.gentmp (Type.App(Type.Unit, [])), (Type.App(Type.Unit, []))), $1, $3) }
+    
 fundef:
-| IDENT formal_args EQUAL exp
+| IDENT formal_args EQUAL sequence
     { { name = addtyp $1; args = $2; body = $4 } }
 
 formal_args:
@@ -124,3 +141,16 @@ actual_args:
 | simple_exp
     %prec prec_app
     { [$1] }
+
+list: 
+| 
+    { [] }
+| exp tail
+    { $1 :: $2 }
+
+tail: 
+| 
+    { [] }
+| SEMICOLON exp tail
+    { $2 :: $3 }
+    

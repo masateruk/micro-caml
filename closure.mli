@@ -1,6 +1,7 @@
 type closure = { entry : Id.l; actual_fv : Id.t list }
 type t =
   | Unit
+  | Nil of Type.t
   | Bool of bool
   | Int of int
   | Not of Id.t
@@ -9,6 +10,7 @@ type t =
   | Sub of Id.t * Id.t
   | Mul of Id.t * Id.t
   | Div of Id.t * Id.t
+  | Cons of Id.t * Id.t
   | IfEq of Id.t * Id.t * t * t
   | IfLE of Id.t * Id.t * t * t
   | Let of (Id.t * Type.t) * t * t
@@ -24,6 +26,7 @@ type fundef = {
 }
 type prog = Prog of fundef list * t
 
-val ml_of_prog : prog -> string
+val string_of_exp : t -> string
+val string_of_prog : prog -> string
 val fv : t -> S.t
 val f : KNormal.t -> prog

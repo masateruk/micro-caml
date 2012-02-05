@@ -1,6 +1,7 @@
 type closure = { entry : Id.l; actual_fv : Id.t list }
 type t = (* クロージャ変換後の式 (caml2html: closure_t) *)
   | Unit
+  | Nil of Type.t
   | Bool of bool
   | Int of int
   | Not of Id.t
@@ -9,6 +10,7 @@ type t = (* クロージャ変換後の式 (caml2html: closure_t) *)
   | Sub of Id.t * Id.t
   | Mul of Id.t * Id.t
   | Div of Id.t * Id.t
+  | Cons of Id.t * Id.t
   | IfEq of Id.t * Id.t * t * t
   | IfLE of Id.t * Id.t * t * t
   | Let of (Id.t * Type.t) * t * t
@@ -20,11 +22,11 @@ type fundef = { name : Id.l * Type.t;
 		args : (Id.t * Type.t) list;
 		formal_fv : (Id.t * Type.t) list;
 		body : t }
-type typedef = { typ_name : Id.t; typ_def : Type.t }
 type prog = Prog of fundef list * t
 
-let rec ml_of_expr = function
+let rec string_of_exp = function
   | Unit -> "()"
+  | Nil _ -> "[]"
   | Bool(b) -> string_of_bool b
   | Int(n) -> string_of_int n
   | Not(s) -> "not " ^ s
@@ -33,25 +35,26 @@ let rec ml_of_expr = function
   | Sub(s1, s2) -> s1 ^ " - " ^ s2
   | Mul(s1, s2) -> s1 ^ " * " ^ s2
   | Div(s1, s2) -> s1 ^ " / " ^ s2
-  | IfEq(s1, s2, e1, e2) -> "if " ^ s1 ^ " = " ^ s2 ^ "\n\tthen " ^ (ml_of_expr e1) ^ "\n\telse " ^ (ml_of_expr e2)
-  | IfLE(s1, s2, e1, e2) -> "if " ^ s1 ^ " < " ^ s2 ^ "\n\tthen " ^ (ml_of_expr e1) ^ "\n\telse " ^ (ml_of_expr e2)
-  | Let((s1, t), e1, e2) -> "let " ^ s1 ^ (* " : " ^ (Id.ml_of_typ t) ^ *) " = " ^ (ml_of_expr e1) ^ " in\n" ^ (ml_of_expr e2)
+  | Cons(s1, s2) -> s1 ^ " :: " ^ s2
+  | IfEq(s1, s2, e1, e2) -> "if " ^ s1 ^ " = " ^ s2 ^ "\n\tthen " ^ (string_of_exp e1) ^ "\n\telse " ^ (string_of_exp e2)
+  | IfLE(s1, s2, e1, e2) -> "if " ^ s1 ^ " < " ^ s2 ^ "\n\tthen " ^ (string_of_exp e1) ^ "\n\telse " ^ (string_of_exp e2)
+  | Let((s1, t), e1, e2) -> "let " ^ s1 ^ (* " : " ^ (Id.string_of_typ t) ^ *) " = " ^ (string_of_exp e1) ^ " in\n" ^ (string_of_exp e2)
   | Var(s) -> s
-  | MakeCls((x, t), { entry = Id.L(l); actual_fv = ys }, e) -> "((" ^ (ml_of_expr e) ^ "), " ^ (String.concat ", " ys) ^ ")"
+  | MakeCls((x, t), { entry = Id.L(l); actual_fv = ys }, e) -> "let " ^ x ^ " : closure = make_closure " ^ l ^ " " ^ (String.concat ", " ys) ^ " in " ^ (string_of_exp e)
   | AppCls(x, args) -> "apply_closure " ^ x ^ " " ^ (String.concat " " args)
   | AppDir(Id.L(x), args) -> x ^ " " ^ (String.concat " " args)
 
-let ml_of_fundef { name = (Id.L(x), t); args = yts; formal_fv = zts; body = e } =
-  "\nlet rec " ^ x ^ " " ^ (String.concat " " (List.map (fun (y, t) -> y) (yts @ zts))) ^ (* " : " ^ (Id.ml_of_typ t) ^ *) " = " ^ (ml_of_expr e) 
+let string_of_fundef { name = (Id.L(x), t); args = yts; formal_fv = zts; body = e } =
+  "\nlet rec " ^ x ^ " " ^ (String.concat " " (List.map (fun (y, t) -> y) (yts @ zts))) ^ (* " : " ^ (Id.string_of_typ t) ^ *) " = " ^ (string_of_exp e) 
 
-let ml_of_prog (Prog(defs, e)) = 
+let string_of_prog (Prog(defs, e)) = 
   "let rec apply_closure (body, fv) arg = body arg fv\n" ^
-  (String.concat "\n" ((List.map ml_of_fundef) defs)) ^ "\n(******)\n" ^ (ml_of_expr e)
+  (String.concat "\n" ((List.map string_of_fundef) defs)) ^ "\n(******)\n" ^ (string_of_exp e)
     
 let rec fv = function
-  | Unit | Bool(_) | Int(_) -> S.empty
+  | Unit | Nil(_) | Bool(_) | Int(_) -> S.empty
   | Not(x) | Neg(x) -> S.singleton x
-  | Add(x, y) | Sub(x, y) | Mul(x, y) | Div(x, y) -> S.of_list [x; y]
+  | Add(x, y) | Sub(x, y) | Mul(x, y) | Div(x, y) | Cons(x, y) -> S.of_list [x; y]
   | IfEq(x, y, e1, e2)| IfLE(x, y, e1, e2) -> S.add x (S.add y (S.union (fv e1) (fv e2)))
   | Let((x, t), e1, e2) -> S.union (fv e1) (S.remove x (fv e2))
   | Var(x) -> S.singleton x
@@ -61,32 +64,22 @@ let rec fv = function
 
 let toplevel : fundef list ref = ref []
 
-let rec g env known type_check = function (* クロージャ変換ルーチン本体 (caml2html: closure_g) *)
-  | KNormal.Unit -> Unit, Type.Unit
-  | KNormal.Bool(b) -> Bool(b), Type.Bool
-  | KNormal.Int(i) -> Int(i), Type.Int
-  | KNormal.Not(x) -> Not(x), Type.Bool
-  | KNormal.Neg(x) -> Neg(x), Type.Int
-  | KNormal.Add(x, y) -> Add(x, y), Type.Int
-  | KNormal.Sub(x, y) -> Sub(x, y), Type.Int
-  | KNormal.Mul(x, y) -> Mul(x, y), Type.Int
-  | KNormal.Div(x, y) -> Div(x, y), Type.Int
-  | KNormal.IfEq(x, y, e1, e2) -> 
-      let (e1', t1') = g env known type_check e1 in
-      let (e2', t2') = g env known type_check e2 in
-	(assert(not type_check || Type.eq t1' t2');
-	 IfEq(x, y, e1', e2'), t1')
-  | KNormal.IfLE(x, y, e1, e2) -> 
-      let (e1', t1') = g env known type_check e1 in
-      let (e2', t2') = g env known type_check e2 in
-	(assert(not type_check || Type.eq t1' t2');
-	 IfLE(x, y, e1', e2'), t1')
-  | KNormal.Let((x, t), e1, e2) -> 
-      let (e1', t1') = g env known type_check e1 in
-	(* Typing.unify ではクロージャも Fun 型になっているので改めてこの段階で x の型を入れ直す。*)
-      let (e2', t2') = g (M.add x t env) known type_check e2 in
-	Let((x, t1'), e1', e2'), t2'
-  | KNormal.Var(x) -> Var(x), (M.find x env)
+let rec g env known = function (* クロージャ変換ルーチン本体 (caml2html: closure_g) *)
+  | KNormal.Unit -> Unit
+  | KNormal.Nil(t) -> Nil(t)
+  | KNormal.Bool(b) -> Bool(b)
+  | KNormal.Int(i) -> Int(i)
+  | KNormal.Not(x) -> Not(x)
+  | KNormal.Neg(x) -> Neg(x)
+  | KNormal.Add(x, y) -> Add(x, y)
+  | KNormal.Sub(x, y) -> Sub(x, y)
+  | KNormal.Mul(x, y) -> Mul(x, y)
+  | KNormal.Div(x, y) -> Div(x, y)
+  | KNormal.Cons(x, y) -> assert false (* not implemented *)
+  | KNormal.IfEq(x, y, e1, e2) -> IfEq(x, y, g env known e1, g env known e2)
+  | KNormal.IfLE(x, y, e1, e2) -> IfLE(x, y, g env known e1, g env known e2)
+  | KNormal.Let((x, t), e1, e2) -> Let((x, t), g env known e1, g (M.add x t env) known e2)
+  | KNormal.Var(x) -> Var(x)
   | KNormal.LetRec({ KNormal.name = (x, t); KNormal.args = yts; KNormal.body = e1 }, e2) -> (* 関数定義の場合 (caml2html: closure_letrec) *)
       (* 関数定義let rec x y1 ... yn = e1 in e2の場合は、
 	 xに自由変数がない(closureを介さずdirectに呼び出せる)
@@ -94,56 +87,37 @@ let rec g env known type_check = function (* クロージャ変換ルーチン本体 (caml2ht
       let toplevel_backup = !toplevel in
       let env' = M.add x t env in
       let known' = S.add x known in
-      let (e1', t1') = g (M.add_list yts env') known' false e1 in
-	(* 本当に自由変数がなかったか、変換結果e1'を確認する *)
-	(* 注意: e1'にx自身が変数として出現する場合はclosureが必要!
-           (thanks to nuevo-namasute and azounoman; test/cls-bug2.ml参照) *)
+      let e1' = g (M.add_list yts env') known' e1 in
+      (* 本当に自由変数がなかったか、変換結果e1'を確認する *)
+      (* 注意: e1'にx自身が変数として出現する場合はclosureが必要!
+         (thanks to nuevo-namasute and azounoman; test/cls-bug2.ml参照) *)
       let zs = S.diff (fv e1') (S.of_list (List.map fst yts)) in
-      let known', e1', t1' =
-	if S.is_empty zs then known', e1', t1' else
-	  (* 駄目だったら状態(toplevelの値)を戻して、クロージャ変換をやり直す *)
-	  (Format.eprintf "free variable(s) %s found in function %s@." (Id.pp_list (S.elements zs)) x;
-	   Format.eprintf "function %s cannot be directly applied in fact@." x;
-	   toplevel := toplevel_backup;
-	   let (e1', t1') = g (M.add_list yts env') known type_check e1 in
-	     known, e1', t1') in
-
+      let known', e1' =
+	if S.is_empty zs then known', e1' else
+	(* 駄目だったら状態(toplevelの値)を戻して、クロージャ変換をやり直す *)
+	(Format.eprintf "free variable(s) %s found in function %s@." (Id.pp_list (S.elements zs)) x;
+	 Format.eprintf "function %s cannot be directly applied in fact@." x;
+	 toplevel := toplevel_backup;
+	 let e1' = g (M.add_list yts env') known e1 in
+	 known, e1') in
       let zs = S.elements (S.diff (fv e1') (S.add x (S.of_list (List.map fst yts)))) in (* 自由変数のリスト *)
-      let zts = List.map (fun z -> (z, M.find z env)) zs in (* ここで自由変数zの型を引くために引数 env が必要。もとは env' だったけれど zs に x が含まれないので env でも大丈夫 *)
-	
-      (* t の結果型を e1' の型で置き換える。結果型が Fun の場合にクロージャに変更するため。さらに Fun に自由変数の型を追加。これで適応可能かどうか判定可能に。*)
-      let t = match t with Type.Fun(args, _, fv) -> Type.Fun(args, t1', fv @ (List.map snd zts)) | _ -> assert false in 
-      let env' = M.add x t env in
-
-      let toplevel_backup = !toplevel in
-
-	toplevel := { name = (Id.L(x), t); args = yts; formal_fv = zts; body = e1' } :: !toplevel; (* トップレベル関数を追加。トップレベルの型は常に Fun 型 *)
-	let (e2', t2') = g env' known' false e2 in
-	  if S.mem x (fv e2') then (* xが変数としてe2'に出現するか *)
-
-	    (* xが変数としてe2'に出現する場合は、xをクロージャとして参照しないといけないので env 中の x の型をクロージャにして e2 を変換をやり直す *)
-	    (* e2 の再変換をやりなおす前に toplevel をもとに戻す *)
-	    let _ = toplevel := toplevel_backup in
-	    let _ = toplevel := { name = (Id.L(x), t); args = yts; formal_fv = zts; body = e1' } :: !toplevel in
-	    let t' = Type.Closure(t, List.map snd zts) in
-	    let env' = M.add x t' env in
-	    let e2', t2' = g env' known' type_check e2 in
-	      
-	      (Format.eprintf "making closure(s) %s@." x;
-	       MakeCls((x, t'), { entry = Id.L(x); actual_fv = zs }, e2'), t2') (* 出現していたら削除しない *)
-
-	  else
-	    (Format.eprintf "eliminating closure(s) %s@." x;
-	     e2', t2') (* 出現しなければMakeClsを削除 *)
+      let zts = List.map (fun z -> (z, M.find z env')) zs in (* ここで自由変数zの型を引くために引数envが必要 *)
+      toplevel := { name = (Id.L(x), t); args = yts; formal_fv = zts; body = e1' } :: !toplevel; (* トップレベル関数を追加 *)
+      let e2' = g env' known' e2 in
+      if S.mem x (fv e2') && (zs <> []) then (* xが変数としてe2'に出現するか。自由変数がないときは関数のまま使用する *)
+	MakeCls((x, t), { entry = Id.L(x); actual_fv = zs }, e2') (* 出現していたら削除しない *)
+      else
+	(Format.eprintf "eliminating closure(s) %s@." x;
+	 e2') (* 出現しなければMakeClsを削除 *)
   | KNormal.App(x, ys) when S.mem x known -> (* 関数適用の場合 (caml2html: closure_app) *)
       Format.eprintf "directly applying %s@." x;
-      AppDir(Id.L(x), ys), (Type.apply (M.find x env) (List.map (fun y -> (M.find y env)) ys))
+      AppDir(Id.L(x), ys)
   | KNormal.App(c, xs) -> 
-      AppCls(c, xs), (Type.apply (M.find c env) (List.map (fun x -> (M.find x env)) xs))
+      AppCls(c, xs)
   | KNormal.ExtFunApp(x, ys) -> 
-      AppDir(Id.L(x), ys), (Type.apply (M.find x !Typing.extenv) (List.map (fun y -> (M.find y env)) ys))
+      AppDir(Id.L(x), ys)
       
 let f e =
   toplevel := [];
-  let (e', _) = g M.empty S.empty true e in
+  let e' = g M.empty S.empty e in
   Prog(List.rev !toplevel, e')

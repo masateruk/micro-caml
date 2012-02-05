@@ -17,6 +17,10 @@ rule token = parse
     { LPAREN }
 | ')'
     { RPAREN }
+| '['
+    { LSQUARE_BRANKET }
+| ']'
+    { RSQUARE_BRANKET }
 | "true"
     { BOOL(true) }
 | "false"
@@ -35,6 +39,8 @@ rule token = parse
     { AST }
 | '/'
     { SLASH }
+| "::"
+    { CONS }
 | '='
     { EQUAL }
 | "<>"
@@ -60,7 +66,9 @@ rule token = parse
 | "rec"
     { REC }
 | '_'
-    { IDENT(Id.gentmp Type.Unit) }
+    { IDENT(Id.gentmp (Type.App(Type.Unit, []))) }
+| ';'
+    { SEMICOLON }
 | eof
     { EOF }
 | lower (digit|lower|upper|'_')* (* 他の「予約語」より後でないといけない *)

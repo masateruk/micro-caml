@@ -1,14 +1,18 @@
-type t =
-    Unit
-  | Bool
-  | Int
-  | Fun of t list * t * t list
-  | Var of t option ref
-  | Closure of t * t list
-  | Record of (string * t) list
-  | Name of string * t
-val gentyp : unit -> t
-val id_of_typ : t -> string
+type t = 
+    | Var of tyvar 
+    | App of tycon * t list 
+    | Poly of tyvar list * t
+    | Meta of t option ref
+and tycon = 
+    | Unit 
+    | Bool 
+    | Int 
+    | Arrow 
+    | TyFun of tyvar list * t
+and tyvar = string
+and metavar = string
+val counter : int ref
+val newtyvar : unit -> string
+val newmetavar : unit -> t option ref
 val string_of_typ : t -> string
-val eq : t -> t -> bool
-val apply : t -> t list -> t
+val string_of_tycon : tycon -> string
