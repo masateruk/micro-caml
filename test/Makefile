@@ -1,10 +1,22 @@
 PWD = $(shell pwd)
-PROGRAM = $(PWD)/../ucaml
 
+PROGRAM = ../ucaml
 TESTS = $(shell ls *.ml)
 TRASH = *.log *.c *.out *.cmo *.cmi
 
-.PHONY:all do_test clean
+INC_DIRS := \
+	/usr/local/include \
+	$(PWD)/..
+
+SYSTEM = $(shell uname -s)
+ifeq ($(SYSTEM), Cygwin)
+INC_DIRS := $(shell cygpath -m $(INC_DIRS))
+endif
+
+CFLAGS := -Wall \
+	$(addprefix -I, $(INC_DIRS))
+
+.PHONY:all do_test clean foo
 .PRECIOUS: $(patsubst %.ml, %.c, $(TESTS))
 
 all: clean do_test
@@ -15,7 +27,7 @@ do_test: $(TESTS:%.ml=%.diff)
 	$(PROGRAM) $*.ml -v -o $*.c 
 
 %.out: %.c
-	gcc -Wall $*.c -o $*.out -I/usr/local/include -I$(PWD)/.. -lgc -L/usr/local/lib
+	gcc $*.c -o $*.out $(CFLAGS) -lgc -L/usr/local/lib
 
 %.log: %.out
 	./$*.out > $*.log
