@@ -1,19 +1,22 @@
-let lexbuf outchan l = (* ¥Ð¥Ã¥Õ¥¡¤ò¥³¥ó¥Ñ¥¤¥ë¤·¤Æ¥Á¥ã¥ó¥Í¥ë¤Ø½ÐÎÏ¤¹¤ë (caml2html: main_lexbuf) *)
+let lexbuf outchan l = (* ãƒãƒƒãƒ•ã‚¡ã‚’ã‚³ãƒ³ãƒ‘ã‚¤ãƒ«ã—ã¦ãƒãƒ£ãƒ³ãƒãƒ«ã¸å‡ºåŠ›ã™ã‚‹ (caml2html: main_lexbuf) *)
   Id.counter := 0;
   Typing.extenv := M.add_list [
-    ("print_int", (Type.App(Type.Arrow, [Type.App(Type.Int, []); Type.App(Type.Unit, [])])))
+    ("print_int", (Type.App(Type.Arrow, [Type.App(Type.Int, []); Type.App(Type.Unit, [])])));
+    ("assert", (Type.App(Type.Arrow, [Type.App(Type.Bool, []); Type.App(Type.Unit, [])])))
   ] M.empty;
   output_string outchan
-    (C.f 
-	(Closure.f
-	    (Assoc.f
-		(Alpha.f 
-		    (KNormal.f
-			(Wrap.f
-			    (Typing.f 
-				(Parser.sequence Lexer.token l))))))))
+    (CFormat.f
+	(Optimize.f
+	    (C.f 
+		(Closure.f
+		    (Assoc.f 
+			(Alpha.f 
+			    (KNormal.f
+				(Wrap.f
+				    (Typing.f 
+					(Parser.sequence Lexer.token l))))))))))
 
-let file input output = (* ¥Õ¥¡¥¤¥ë¤ò¥³¥ó¥Ñ¥¤¥ë¤·¤Æ¥Õ¥¡¥¤¥ë¤Ë½ÐÎÏ¤¹¤ë (caml2html: main_file) *)
+let file input output = (* ãƒ•ã‚¡ã‚¤ãƒ«ã‚’ã‚³ãƒ³ãƒ‘ã‚¤ãƒ«ã—ã¦ãƒ•ã‚¡ã‚¤ãƒ«ã«å‡ºåŠ›ã™ã‚‹ (caml2html: main_file) *)
   let inchan = open_in input in
   let outchan = if output = "" then stdout else open_out output in
   try
@@ -22,12 +25,13 @@ let file input output = (* ¥Õ¥¡¥¤¥ë¤ò¥³¥ó¥Ñ¥¤¥ë¤·¤Æ¥Õ¥¡¥¤¥ë¤Ë½ÐÎÏ¤¹¤ë (caml2html
     close_out outchan;
   with e -> (close_in inchan; close_out outchan; raise e)
 
-let () = (* ¤³¤³¤«¤é¥³¥ó¥Ñ¥¤¥é¤Î¼Â¹Ô¤¬³«»Ï¤µ¤ì¤ë (caml2html: main_entry) *)
+let () = (* ã“ã“ã‹ã‚‰ã‚³ãƒ³ãƒ‘ã‚¤ãƒ©ã®å®Ÿè¡ŒãŒé–‹å§‹ã•ã‚Œã‚‹ (caml2html: main_entry) *)
   let infile = ref "" in
   let outfile = ref "" in
     Arg.parse [
       ("-o", Arg.String(fun o -> outfile := o), "output file");
-      ("-v", Arg.Unit(fun _ -> D.verbose := true), "verbose mode")
+      ("-v", Arg.Unit(fun _ -> D.verbose := true), "verbose mode");
+      ("--gc", Arg.Unit(fun _ -> C.enable_gc := true), "enable Boehm GC")
     ]
       (fun s -> infile := s)
       (Printf.sprintf "usage: %s [-o file] [-v] filename" Sys.argv.(0));

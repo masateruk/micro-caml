@@ -1,5 +1,5 @@
-type t = string (* ÊÑ¿ô¤ÎÌ¾Á° (caml2html: id_t) *)
-type l = L of string (* ¥È¥Ã¥×¥ì¥Ù¥ë´Ø¿ô¤ä¥°¥í¡¼¥Ğ¥ëÇÛÎó¤Î¥é¥Ù¥ë (caml2html: id_l) *)
+type t = string (* å¤‰æ•°ã®åå‰ (caml2html: id_t) *)
+type l = L of string (* ãƒˆãƒƒãƒ—ãƒ¬ãƒ™ãƒ«é–¢æ•°ã‚„ã‚°ãƒ­ãƒ¼ãƒãƒ«é…åˆ—ã®ãƒ©ãƒ™ãƒ« (caml2html: id_l) *)
 
 let rec pp_list = function
   | [] -> ""
@@ -9,7 +9,7 @@ let rec pp_list = function
 let counter = ref 0
 let genid s =
   incr counter;
-  Printf.sprintf "%s%d" s !counter
+  Printf.sprintf "_%s%d" s !counter
   
 let rec id_of_typ = function
   | Type.Var _ -> "v" 
@@ -21,9 +21,17 @@ and id_of_tycon = function
     | Type.Unit -> "u"
     | Type.Bool -> "b"
     | Type.Int -> "n"
-    | Type.Arrow -> "a"
+    | Type.Arrow -> "pfn"
     | Type.TyFun(_, t) -> id_of_typ t
 
-let gentmp typ =
-  incr counter;
-  Printf.sprintf "tmp_%s%d" (id_of_typ typ) !counter
+let gentmp typ = genid (id_of_typ typ)
+
+let rec ocaml_of_typ = function
+  | Type.Var _ -> "'a"
+  | Type.App(Type.Unit, []) -> "()"
+  | Type.App(Type.Bool, []) -> "bool"
+  | Type.App(Type.Int, []) -> "int"
+  | Type.App(Type.Arrow, xs) -> String.concat " -> " (List.map ocaml_of_typ xs)
+  | Type.Poly([], t) -> ocaml_of_typ t      
+  | _ -> assert false
+    

@@ -19,3 +19,4 @@ type t =
   | ExtFunApp of Id.t * Id.t list
 and fundef = { name : Id.t * Type.t; args : (Id.t * Type.t) list; body : t }
 val f : Syntax.t -> t
+val ocaml_of_expr : t -> Id.t

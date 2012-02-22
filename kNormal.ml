@@ -1,6 +1,6 @@
 (* give names to intermediate values (K-normalization) *)
 
-type t = (* KÀµµ¬²½¸å¤Î¼° (caml2html: knormal_t) *)
+type t = (* Kæ­£è¦åŒ–å¾Œã®å¼ (caml2html: knormal_t) *)
   | Unit
   | Nil of Type.t
   | Bool of bool
@@ -12,8 +12,8 @@ type t = (* KÀµµ¬²½¸å¤Î¼° (caml2html: knormal_t) *)
   | Mul of Id.t * Id.t
   | Div of Id.t * Id.t
   | Cons of Id.t * Id.t
-  | IfEq of Id.t * Id.t * t * t (* Èæ³Ó + Ê¬´ô (caml2html: knormal_branch) *)
-  | IfLE of Id.t * Id.t * t * t (* Èæ³Ó + Ê¬´ô *)
+  | IfEq of Id.t * Id.t * t * t (* æ¯”è¼ƒ + åˆ†å² (caml2html: knormal_branch) *)
+  | IfLE of Id.t * Id.t * t * t (* æ¯”è¼ƒ + åˆ†å² *)
   | Let of (Id.t * Type.t) * t * t
   | Var of Id.t
   | LetRec of fundef * t
@@ -21,7 +21,27 @@ type t = (* KÀµµ¬²½¸å¤Î¼° (caml2html: knormal_t) *)
   | ExtFunApp of Id.t * Id.t list
 and fundef = { name : Id.t * Type.t; args : (Id.t * Type.t) list; body : t }
 
-let insert_let (e, t) k = (* let¤òÁÞÆþ¤¹¤ëÊä½õ´Ø¿ô (caml2html: knormal_insert) *)
+let rec ocaml_of_expr = function
+  | Unit -> "()"
+  | Bool(b) -> string_of_bool b
+  | Int(n) -> string_of_int n
+  | Not(s) -> "not " ^ s
+  | Neg(s) -> "! " ^ s
+  | Add(s1, s2) -> s1 ^ " + " ^ s2
+  | Sub(s1, s2) -> s1 ^ " - " ^ s2
+  | Mul(s1, s2) -> s1 ^ " * " ^ s2
+  | Div(s1, s2) -> s1 ^ " / " ^ s2
+  | IfEq(s1, s2, e1, e2) -> "if " ^ s1 ^ " = " ^ s2 ^ "\n\tthen " ^ (ocaml_of_expr e1) ^ "\n\telse " ^ (ocaml_of_expr e2)
+  | IfLE(s1, s2, e1, e2) -> "if " ^ s1 ^ " < " ^ s2 ^ "\n\tthen " ^ (ocaml_of_expr e1) ^ "\n\telse " ^ (ocaml_of_expr e2)
+  | Let((s1, t), e1, e2) -> "\nlet " ^ s1 ^ " : " ^ (Id.ocaml_of_typ  t) ^ " = " ^ (ocaml_of_expr e1) ^ " in\n" ^ (ocaml_of_expr e2)
+  | Var(s) -> s
+  | LetRec({ name = (x, t); args = yts; body = e1 }, e2) -> 
+      "\nlet rec " ^ x ^ " " ^ (String.concat " " (List.map (fun (y, t) -> y) yts)) ^ " : " ^ (Id.ocaml_of_typ  t) ^ " =\n"
+      ^ (ocaml_of_expr e1) ^ " in\n" ^ (ocaml_of_expr e2)
+  | App(s, args) -> "(" ^ s ^ " " ^ (String.concat " " args) ^ ")"
+  | ExtFunApp(s, args) -> "(" ^ s ^ " " ^ (String.concat " " args) ^ ")"
+      
+let insert_let (e, t) k = (* letã‚’æŒ¿å…¥ã™ã‚‹è£œåŠ©é–¢æ•° (caml2html: knormal_insert) *)
   match e with
   | Var(x) -> k x
   | _ ->
@@ -29,7 +49,7 @@ let insert_let (e, t) k = (* let¤òÁÞÆþ¤¹¤ëÊä½õ´Ø¿ô (caml2html: knormal_insert) *
       let e', t' = k x in
 	Let((x, t), e, e'), t'
 
-let rec g env e = (* KÀµµ¬²½¥ë¡¼¥Á¥óËÜÂÎ (caml2html: knormal_g) *)
+let rec g env e = (* Kæ­£è¦åŒ–ãƒ«ãƒ¼ãƒãƒ³æœ¬ä½“ (caml2html: knormal_g) *)
   let _ = D.printf "kNormal.g %s\n" (Syntax.string_of_exp e) in  
     match e with
   | Syntax.Unit -> Unit, Type.App(Type.Unit, [])
@@ -42,7 +62,7 @@ let rec g env e = (* KÀµµ¬²½¥ë¡¼¥Á¥óËÜÂÎ (caml2html: knormal_g) *)
   | Syntax.Neg(e) ->
       insert_let (g env e)
 	(fun x -> Neg(x), Type.App(Type.Int, []))
-  | Syntax.Add(e1, e2) -> (* Â­¤·»»¤ÎKÀµµ¬²½ (caml2html: knormal_add) *)
+  | Syntax.Add(e1, e2) -> (* è¶³ã—ç®—ã®Kæ­£è¦åŒ– (caml2html: knormal_add) *)
       insert_let (g env e1)
 	(fun x -> insert_let (g env e2)
 	  (fun y -> Add(x, y), Type.App(Type.Int, [])))
@@ -66,7 +86,7 @@ let rec g env e = (* KÀµµ¬²½¥ë¡¼¥Á¥óËÜÂÎ (caml2html: knormal_g) *)
 	    (fun y -> Cons(x, y), t2))
   | Syntax.Eq _ | Syntax.LE _ as cmp ->
       g env (Syntax.If(cmp, Syntax.Bool(true), Syntax.Bool(false)))
-  | Syntax.If(Syntax.Not(e1), e2, e3) -> g env (Syntax.If(e1, e3, e2)) (* not¤Ë¤è¤ëÊ¬´ô¤òÊÑ´¹ (caml2html: knormal_not) *)
+  | Syntax.If(Syntax.Not(e1), e2, e3) -> g env (Syntax.If(e1, e3, e2)) (* notã«ã‚ˆã‚‹åˆ†å²ã‚’å¤‰æ› (caml2html: knormal_not) *)
   | Syntax.If(Syntax.Eq(e1, e2), e3, e4) ->
       insert_let (g env e1)
 	(fun x -> insert_let (g env e2)
@@ -81,7 +101,7 @@ let rec g env e = (* KÀµµ¬²½¥ë¡¼¥Á¥óËÜÂÎ (caml2html: knormal_g) *)
 	    let e3', t3 = g env e3 in
 	    let e4', t4 = g env e4 in
 	      IfLE(x, y, e3', e4'), t3))
-  | Syntax.If(e1, e2, e3) -> g env (Syntax.If(Syntax.Eq(e1, Syntax.Bool(false)), e3, e2)) (* Èæ³Ó¤Î¤Ê¤¤Ê¬´ô¤òÊÑ´¹ (caml2html: knormal_if) *)
+  | Syntax.If(e1, e2, e3) -> g env (Syntax.If(Syntax.Eq(e1, Syntax.Bool(false)), e3, e2)) (* æ¯”è¼ƒã®ãªã„åˆ†å²ã‚’å¤‰æ› (caml2html: knormal_if) *)
   | Syntax.Let((x, t), e1, e2) ->
       let e1', t1 = g env e1 in
       let e2', t2 = g (M.add x t env) e2 in
@@ -93,7 +113,7 @@ let rec g env e = (* KÀµµ¬²½¥ë¡¼¥Á¥óËÜÂÎ (caml2html: knormal_g) *)
       let e2', t2 = g env' e2 in
       let e1', t1 = g (M.add_list yts env') e1 in
 	LetRec({ name = (x, t); args = yts; body = e1' }, e2'), t2
-  | Syntax.App(Syntax.Var(f), e2s) when not (M.mem f env) -> (* ³°Éô´Ø¿ô¤Î¸Æ¤Ó½Ð¤· (caml2html: knormal_extfunapp) *)
+  | Syntax.App(Syntax.Var(f), e2s) when not (M.mem f env) -> (* å¤–éƒ¨é–¢æ•°ã®å‘¼ã³å‡ºã— (caml2html: knormal_extfunapp) *)
       (match M.find f !Typing.extenv with
 	| Type.App(Type.Arrow, ts) ->
 	    let t = List.hd (List.rev ts) in
@@ -118,5 +138,7 @@ let rec g env e = (* KÀµµ¬²½¥ë¡¼¥Á¥óËÜÂÎ (caml2html: knormal_g) *)
 		  bind [] e2s) (* left-to-right evaluation *)
 	| _, t -> Printf.eprintf "type is %s\n" (Type.string_of_typ t); assert false)
 	
-let f e = fst (g M.empty e)
-  
+let f e = 
+  let e' = fst (g M.empty e) in
+  let _ = D.printf "KNormal.f DONE BEGIN\n%s\nKNormal.f DONE END\n" (ocaml_of_expr e') in
+    e'

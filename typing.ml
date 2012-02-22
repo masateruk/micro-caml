@@ -27,7 +27,8 @@ let rec occur x = function (* occur check (caml2html: typing_occur) *)
   | Type.Meta(y) -> x == y
   | _ -> false
 
-let rec unify t1 t2 = (* ·¿¤¬¹ç¤¦¤è¤¦¤Ë¡¢¥á¥¿·¿ÊÑ¿ô¤Ø¤ÎÂåÆþ¤ò¤¹¤ë. À®¸ù¤·¤¿¤é () ¤òÊÖ¤¹. (caml2html: typing_unify) *)
+let rec unify t1 t2 = (* åž‹ãŒåˆã†ã‚ˆã†ã«ã€ãƒ¡ã‚¿åž‹å¤‰æ•°ã¸ã®ä»£å…¥ã‚’ã™ã‚‹. æˆåŠŸã—ãŸã‚‰ () ã‚’è¿”ã™. (caml2html: typing_unify) *)
+  let _ = D.printf "  Typing.unify %s %s\n" (Type.string_of_typ t1) (Type.string_of_typ t2) in
   match t1, t2 with
   | Type.App(Type.Unit, xs), Type.App(Type.Unit, ys) 
   | Type.App(Type.Bool, xs), Type.App(Type.Bool, ys) 
@@ -59,12 +60,19 @@ let rec expand = function
 
 let rec generalize env t = 
   let _ = D.printf "Typing.generalize %s\n" (Type.string_of_typ t) in
+  let rec exists v = function
+    | Type.App(Type.TyFun(_, u), ts) -> exists v u || List.exists (exists v) ts
+    | Type.App(_, ts) -> List.exists (exists v) ts
+    | Type.Poly(_, t) -> exists v t
+    | Type.Meta{ contents = Some(t') } -> exists v t'
+    | Type.Meta(x) when v == x -> true
+    | _ -> false in
   let rec metavars vs = function
     | Type.App(Type.TyFun(_, u), ts) -> List.fold_left metavars (metavars vs u) ts
     | Type.App(_, ts) -> List.fold_left metavars vs ts
     | Type.Poly(_, t) -> metavars vs t
     | Type.Meta{ contents = Some(t') } -> metavars vs t'
-    | Type.Meta(x) when M.exists (fun _ t' -> match t' with Type.Meta(y) when x == y -> true | _ -> false) env -> vs
+    | Type.Meta(x) when M.exists (fun _ t' -> exists x t') env -> vs
     | Type.Meta(x) -> if (List.memq x vs) then vs else x :: vs
     | _ -> vs in
   let ms = metavars [] t in
@@ -77,7 +85,7 @@ let rec instantiate = function
   | t -> t 
   
 (* for pretty printing (and type normalization) *)
-let rec deref_typ = function (* ·¿ÊÑ¿ô¤òÃæ¿È¤Ç¤ª¤­¤«¤¨¤ë´Ø¿ô (caml2html: typing_deref) *)
+let rec deref_typ = function (* åž‹å¤‰æ•°ã‚’ä¸­èº«ã§ãŠãã‹ãˆã‚‹é–¢æ•° (caml2html: typing_deref) *)
   | Type.App(Type.TyFun(xs, t), ys) -> Type.App(Type.TyFun(xs, deref_typ t), List.map deref_typ ys)
   | Type.App(x, ys) -> Type.App(x, List.map deref_typ ys)
   | Type.Poly(xs, t) -> Type.Poly(xs, deref_typ t)
@@ -111,7 +119,7 @@ let rec deref_term = function
   | App(e, es) -> App(deref_term e, List.map deref_term es)
   | e -> e
 
-let rec g env e = (* ·¿¿äÏÀ¥ë¡¼¥Á¥ó (caml2html: typing_g) *)
+let rec g env e = (* åž‹æŽ¨è«–ãƒ«ãƒ¼ãƒãƒ³ (caml2html: typing_g) *)
   let _ = D.printf "Typing.g %s\n" (string_of_exp e) in
   try
     match e with
@@ -149,19 +157,19 @@ let rec g env e = (* ·¿¿äÏÀ¥ë¡¼¥Á¥ó (caml2html: typing_g) *)
 	let t3 = g env e3 in
 	  unify t2 t3;
 	  t2
-    | Let((x, t), e1, e2) -> (* let¤Î·¿¿äÏÀ (caml2html: typing_let) *)
+    | Let((x, t), e1, e2) -> (* letã®åž‹æŽ¨è«– (caml2html: typing_let) *)
 	let t1 = g env e1 in
-	let t1' = generalize env t1 in (* ÉûºîÍÑ¤ÏÌ¤¥µ¥Ý¡¼¥È¤Ê¤Î¤Ç¡¢TigerËÜ¤Îp.335¤Ë¤¢¤ëÂåÆþ¤ÎÈ½Äê¤Ï¤Ê¤· *)
+	let t1' = generalize env t1 in (* å‰¯ä½œç”¨ã¯æœªã‚µãƒãƒ¼ãƒˆãªã®ã§ã€Tigeræœ¬ã®p.335ã«ã‚ã‚‹ä»£å…¥ã®åˆ¤å®šã¯ãªã— *)
 	  unify t t1';
 	  g (M.add x t1' env) e2
-    | Var(x) when M.mem x env -> instantiate (M.find x env) (* ÊÑ¿ô¤Î·¿¿äÏÀ (caml2html: typing_var) *)
+    | Var(x) when M.mem x env -> instantiate (M.find x env) (* å¤‰æ•°ã®åž‹æŽ¨è«– (caml2html: typing_var) *)
     | Var(x) when M.mem x !extenv -> instantiate (M.find x !extenv)
-    | Var(x) -> (* ³°ÉôÊÑ¿ô¤Î·¿¿äÏÀ (caml2html: typing_extvar) *)
+    | Var(x) -> (* å¤–éƒ¨å¤‰æ•°ã®åž‹æŽ¨è«– (caml2html: typing_extvar) *)
 	Format.eprintf "free variable %s assumed as external@." x;
 	let t = Type.Meta(Type.newmetavar ()) in
 	  extenv := M.add x t !extenv;
 	  instantiate t
-    | LetRec({ name = (x, t); args = yts; body = e1 }, e2) -> (* let rec¤Î·¿¿äÏÀ (caml2html: typing_letrec) *)
+    | LetRec({ name = (x, t); args = yts; body = e1 }, e2) -> (* let recã®åž‹æŽ¨è«– (caml2html: typing_letrec) *)
 	let t2 = Type.Meta(Type.newmetavar()) in
 	let t' = Type.App(Type.Arrow, ((List.map snd yts) @ [t2])) in
 	let t1 = g (M.add_list yts (M.add x t' env)) e1 in
@@ -169,16 +177,17 @@ let rec g env e = (* ·¿¿äÏÀ¥ë¡¼¥Á¥ó (caml2html: typing_g) *)
 	  unify t2 t1;
 	  let t'' = generalize env t' in
 	    g (M.add x t'' env) e2
-    | App(e, es) -> (* ´Ø¿ôÅ¬ÍÑ¤Î·¿¿äÏÀ (caml2html: typing_app) *)
+    | App(e, es) -> (* é–¢æ•°é©ç”¨ã®åž‹æŽ¨è«– (caml2html: typing_app) *)
 	let e' = g env e in
 	let es' = List.map (g env) es in
 	let result = Type.Meta(Type.newmetavar ()) in
 	  unify e' (Type.App(Type.Arrow, es' @ [result]));
 	    result
-  with Unify(t1, t2) -> raise (Error(deref_term e, deref_typ t1, deref_typ t2))
+  with Unify(t1, t2) -> 
+    let _ = D.printf "Typing.g error %s : %s and %s\n" (string_of_exp e) (Type.string_of_typ t1) (Type.string_of_typ t2) in
+      raise (Error(deref_term e, deref_typ t1, deref_typ t2))
 
 let f e = 
-  extenv := M.empty;
   (try unify (Type.App(Type.Unit, [])) (g M.empty e)
     with Unify _ -> failwith "top level does not have type unit");
   extenv := M.map deref_typ !extenv;

@@ -1,8 +1,8 @@
-type t = (* MinCaml¤Î·¿¤òÉ½¸½¤¹¤ë¥Ç¡¼¥¿·¿ (caml2html: type_t) *)
+type t = (* MinCamlã®å‹ã‚’è¡¨ç¾ã™ã‚‹ãƒ‡ãƒ¼ã‚¿å‹ (caml2html: type_t) *)
   | Var of tyvar
   | App of tycon * t list
   | Poly of tyvar list * t
-  | Meta of t option ref (* ·¿¿äÏÀ¤Ç¤¢¤È¤ÇÂåÆş¤¹¤ë¤¿¤á¤Ë ref ·¿¤Ë¤Ê¤Ã¤Æ¤¤¤ë *)
+  | Meta of t option ref (* å‹æ¨è«–ã§ã‚ã¨ã§ä»£å…¥ã™ã‚‹ãŸã‚ã« ref å‹ã«ãªã£ã¦ã„ã‚‹ *)
 and tycon =
   | Unit
   | Bool
@@ -22,6 +22,7 @@ let rec string_of_typ = function
   | Var(v) -> "Var(" ^ v ^ ")"
   | App(tycon, []) -> "App(" ^ (string_of_tycon tycon) ^ ", [])"
   | App(tycon, ts) -> "App(" ^ (string_of_tycon tycon) ^ ", [" ^ (String.concat "; " (List.map string_of_typ ts)) ^ "])"
+  | Poly([], t)-> "Poly([], " ^ (string_of_typ t) ^ ")"
   | Poly(xs, t)-> "Poly(" ^ (String.concat ", " xs) ^ ", " ^ (string_of_typ t) ^ ")"
   | Meta{ contents = Some(t) } -> "Meta(Some(" ^ (string_of_typ t) ^ "))"
   | Meta{ contents = None } -> "Meta(none)"

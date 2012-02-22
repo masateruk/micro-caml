@@ -7,7 +7,7 @@ type ty =
     | NameTy of Id.t * ty
     | Box
     | Pointer of ty
-type t = (* C¸À¸ì¤ÎÊ¸ *)
+type t = (* Cè¨€èªžã®æ–‡ *)
     | Dec of (Id.t * ty) * exp option
     | Assign of exp * exp
     | Exp of exp
@@ -18,7 +18,7 @@ type t = (* C¸À¸ì¤ÎÊ¸ *)
     | Block of dec list * t
 and dec =
     | VarDec of (Id.t * ty) * exp option
-and exp = (* C¸À¸ì¤Î¼° *) 
+and exp = (* Cè¨€èªžã®å¼ *) 
     | Nop
     | Nil of ty
     | BoolExp of bool
@@ -33,7 +33,6 @@ and exp = (* C¸À¸ì¤Î¼° *)
     | Var of Id.t
     | CondEq of Id.t * Id.t * exp * exp
     | CondLE of Id.t * Id.t * exp * exp
-    | CallCls of (Id.t * ty) * Id.t list
     | CallDir of exp * exp list
     | MakeClosure of Id.l * Id.t * (Id.t * ty) list
     | Field of Id.t * Id.t
@@ -43,11 +42,13 @@ and exp = (* C¸À¸ì¤Î¼° *)
     | Cast of ty * exp
 type fundef = { name : Id.l; args : (Id.t * ty) list; body : t; ret : ty }
 type def =
-    | FunDef of fundef
-    | TypeDef of (Id.t * ty)
-type prog = Prog of def list * t
+    | FunDef of fundef * bool ref (* used flag *)
+    | TypeDef of (Id.t * ty) * bool ref
+type prog = Prog of def list
 
 exception Concat of t
+
+let enable_gc = ref false
 
 let gentmp t =
   let rec id_of_ty = function
@@ -61,28 +62,57 @@ let gentmp t =
     | Pointer _ -> assert false in
     Id.genid (id_of_ty t)
 
+let rec string_of_type = function
+  | Void -> "void" 
+  | Bool -> "bool"
+  | Int -> "int"
+  | Fun(args, ret) -> (string_of_type ret) ^ " (*)(" ^ (String.concat ", " (List.map string_of_type args)) ^ ")" 
+  | Struct(xts) -> "struct(" ^ (String.concat "; " (List.map (fun (x, t) -> x ^ " : " ^ string_of_type t) xts)) ^ ")"
+  | NameTy(x', _) -> x'
+  | Box -> "sp_t"
+  | Pointer t -> (string_of_type t) ^ "_ptr"
+
 let rec is_ty_equal t1 t2 = match t1, t2 with
   | Void, Void | Int, Int | Bool, Bool -> true
   | Fun(args1, ret1), Fun(args2, ret2) -> (try List.for_all2 is_ty_equal args1 args2 with Invalid_argument _ -> false) && is_ty_equal ret1 ret2
-  | Struct(xts), Struct(yts) -> (try List.for_all2 (fun (x, t1) (y, t2) -> x = y && is_ty_equal t1 t2) xts yts with Invalid_argument _ -> false)
+  | Struct(xts), Struct(yts) -> (try List.for_all2 (fun (_, t1) (_, t2) -> is_ty_equal t1 t2) xts yts with Invalid_argument _ -> false)
+  | Box, Box -> true
+  | Pointer(t1), Pointer(t2) -> is_ty_equal t1 t2
   | NameTy(_, x), _ -> is_ty_equal x t2
   | _, NameTy(_, y) -> is_ty_equal t1 y
-  | Box, Box -> true
   | _ -> false
+      
+let assign (e1, t) e2 =
+  if !enable_gc then
+    Assign(e1, e2)
+  else
+    match t, e2 with
+      | Box, CallDir _ -> Assign(e1, e2)
+      | Box, _ -> Seq(Assign(e1, e2), Exp(CallDir(Var("add_ref"), [e1])))
+      | _ -> Assign(e1, e2)
 
-let rec insert_return = function
-  | Seq(s1, s2) -> Seq(s1, insert_return s2)
-  | Assign(e1, e2) as s-> Seq(s, Return e1)
-  | Exp(e) -> Return(e)
-  | IfEq(x, y, s1, s2) -> IfEq(x, y, insert_return s1, insert_return s2)
-  | IfLE(x, y, s1, s2) -> IfLE(x, y, insert_return s1, insert_return s2)
-  | Block(decs, s') -> Block(decs, insert_return s')
+let rec insert_return t = 
+  let rec return = function
+    | Var(x) as e -> 
+	if t = Box && not !enable_gc then 
+	  Seq(Exp(CallDir(Var("add_ref"), [e])), Return(e)) 
+	else 
+	  Return(e)
+    | e -> let x = gentmp t in 
+	Seq(Dec((x, t), Some(e)), return (Var(x))) in
+  function
+  | Seq(s1, s2) -> Seq(s1, insert_return t s2)
+  | Assign(e1, e2) as s-> Seq(s, return e1)
+  | Exp(e) -> return e
+  | IfEq(x, y, s1, s2) -> IfEq(x, y, insert_return t s1, insert_return t s2)
+  | IfLE(x, y, s1, s2) -> IfLE(x, y, insert_return t s1, insert_return t s2)
+  | Block(decs, s') -> Block(decs, insert_return t s')
   | _ -> assert false
 
 let block s =
   let rec collect_decs = function
     | Dec(xt, None) -> [VarDec(xt, None)], Exp(Nop)
-    | Dec(xt, Some(e)) -> [VarDec(xt, None)], Assign(Var(fst xt), e)
+    | Dec(xt, Some(e)) -> [VarDec(xt, None)], (assign (Var(fst xt), snd xt) e)
     | Seq(s1, s2) -> 
 	let decs1, s1' = collect_decs s1 in
 	let decs2, s2' = collect_decs s2 in
@@ -93,85 +123,26 @@ let block s =
     | Seq(s', Exp(Nop)) -> (remove_nop s')
     | Seq(s1', s2') -> Seq(remove_nop s1', remove_nop s2')
     | s -> s in
+  let release_boxes decs s = 
+    if !enable_gc then
+      s
+    else
+      let rec insert_release x s =
+	let e = Exp(CallDir(Var("release"), [Var(x)])) in
+	  match s with
+	    | Return _ -> Seq(e, s)
+	    | Seq(s1, s2) -> Seq(s1, insert_release x s2)
+	    | s -> Seq(s, e) in
+	List.fold_left 
+	  (fun s dec -> 
+	    match dec with 
+	      | VarDec((x, Box), _) -> insert_release x s
+	      | _ -> s)
+	  s decs in
   let decs, s' = collect_decs s in
-    Block(List.rev decs, remove_nop s')
+    Block(List.rev decs, release_boxes decs (remove_nop s'))
 
-let string_of_indent depth = String.make (depth * 2) ' '
-
-let rec string_of_type ?(x = "") ?(depth = 0) =
-  let plus x = if x = "" then "" else " " ^ x in
-    function
-      | Void -> (string_of_indent depth) ^ "void" 
-      | Bool -> (string_of_indent depth) ^ "bool" ^ (plus x)
-      | Int -> (string_of_indent depth) ^ "int" ^ (plus x)
-      | Fun(args, ret) -> (string_of_indent depth) ^ (string_of_type ret) ^ " (*" ^ x ^ ")(" ^ (String.concat ", " (List.map string_of_type args)) ^ ")" 
-      | Struct(xts) -> 
-	  (string_of_indent depth) ^ "struct {\n" ^ (String.concat ";\n" (List.map (fun (x, t) -> string_of_type ~x:x ~depth:(depth + 1) t) xts)) ^ ";\n" ^ (string_of_indent depth) ^ "}" ^ (plus x)
-      | NameTy(x', _) -> (string_of_indent depth) ^ x' ^ (plus x)
-      | Box -> (string_of_indent depth) ^ "box_t" ^ (plus x)
-      | Pointer t -> (string_of_indent depth) ^ (string_of_type t) ^ "*" ^ (plus x)
-
-let rec string_of_exp = function
-  | Nop -> ""
-  | Nil _ -> "nil"
-  | BoolExp(b) -> string_of_bool b
-  | IntExp(i) -> string_of_int i
-  | Not(x) -> "!" ^ x
-  | Neg(x) -> "-" ^ x
-  | Add(x, y) -> x ^ " + " ^ y
-  | Sub(x, y) -> x ^ " - " ^ y
-  | Mul(x, y) -> x ^ " * " ^ y
-  | Div(x, y) -> x ^ " / " ^ y
-  | Cons(x, y) -> x ^ " :: " ^ y
-  | Var(x) -> x
-  | CondEq(x, y, e1, e2) -> x ^ " == " ^ y ^ " ? " ^ (string_of_exp e1) ^ " : " ^ (string_of_exp e2)
-  | CondLE(x, y, e1, e2) -> x ^ " < " ^ y ^ " ? " ^ (string_of_exp e1) ^ " : " ^ (string_of_exp e2)
-  | CallCls((x, t), xs) -> "apply_" ^ (string_of_type t) ^ "(" ^ x ^ ", " ^ (String.concat ", " xs) ^ ")"
-  | CallDir(x, xs) ->  (string_of_exp x) ^ "(" ^ (String.concat ", " (List.map string_of_exp xs)) ^ ")"
-  | MakeClosure(Id.L(l), x, yts) -> l ^ "(" ^ x ^ ", " ^ (String.concat ", " (List.map fst yts)) ^ ")" 
-  | Field(x, y) -> x ^ "." ^ y
-  | Sizeof(t) -> "sizeof(" ^ (string_of_type t) ^ ")"
-  | Ref(e) -> "&" ^ (string_of_exp e)
-  | Deref(e) -> "*(" ^ (string_of_exp e) ^ ")"
-  | Cast(t, e) -> "(" ^ (string_of_type t) ^ ")" ^ (string_of_exp e)
-
-let rec string_of_separator = function
-  | IfEq _ -> ""
-  | IfLE _ -> ""
-  | Seq(_, s) -> string_of_separator s
-  | Block _ -> ""
-  | _ -> ";"
-
-let rec string_of_prog (Prog(defs, s)) =
-  let rec string_of_statement depth = function
-    | Dec((x, t), None) -> (string_of_indent depth) ^ (string_of_type ~x:x t)
-    | Dec((x, t), Some(e)) -> (string_of_indent depth) ^ (string_of_type ~x:x t) ^ " = " ^ (string_of_exp e)
-    | Assign(x, e) -> (string_of_indent depth) ^ (string_of_exp x) ^ " = " ^ (string_of_exp e)
-    | Exp(e) -> (string_of_indent depth) ^ (string_of_exp e) 
-    | IfEq(x, y, s1, s2) -> (string_of_indent depth) ^ "if (" ^ x ^ " == " ^ y ^ ") " ^ (string_of_statement depth s1) ^ " else " ^ (string_of_statement depth s2)
-    | IfLE(x, y, s1, s2) -> (string_of_indent depth) ^ "if (" ^ x ^ " < " ^ y ^ ") " ^ (string_of_statement depth s1) ^ " else " ^ (string_of_statement depth s2)
-    | Return(e) -> (string_of_indent depth) ^ "return " ^ (string_of_exp e)
-    | Seq(s1, s2) -> (string_of_statement depth s1) ^ (string_of_separator s1) ^ "\n" ^ (string_of_statement depth s2) 
-    | Block([], s) -> "{\n" ^ (string_of_statement (depth + 1) s) ^ ";\n" ^ (string_of_indent depth) ^ "}" 
-    | Block(decs, s) -> "{\n" ^ (String.concat ";\n" (List.map (string_of_dec (depth + 1)) decs)) ^ ";\n\n" ^ (string_of_statement (depth + 1) s) ^ ";\n" ^ (string_of_indent depth) ^ "}" 
-  and string_of_dec depth = function
-    | VarDec((x, t), None) -> (string_of_indent depth) ^ (string_of_type ~x:x t)
-    | VarDec((x, t), Some(e)) -> (string_of_indent depth) ^ (string_of_type ~x:x t) ^ " = " ^ (string_of_exp e) in
-  let string_of_def = function
-    | FunDef({ name = Id.L(x); args = yts; body = s; ret = t }) ->
-	let t' = string_of_type t in
-	let name' = x in
-	let args' = String.concat ", " (List.map (fun (y, t) -> (string_of_type ~x:y t)) yts) in
-	let body' = string_of_statement 0 s in
-	  t' ^ " " ^ name' ^ "(" ^ args' ^ ")\n" ^ body' ^ "\n"
-    | TypeDef(x, t) ->
-	"typedef " ^ (string_of_type ~x:x t) ^ ";\n" in
-      "#include <ucaml.h>\n" ^ 
-      "\n" ^ (String.concat "\n" (List.map string_of_def defs)) ^ "\n" ^
-      "int main()\n" ^
-      (string_of_statement 0 (insert_return (block (Seq(Exp(CallDir(Var("GC_init"), [])), (Seq(s, Exp(IntExp(0))))))))) ^ "\n"
-
-let wrapper (x, t) =
+let rec wrapper (x, t) =
   match t with
     | Fun(args, r) ->
 	assert(List.length args = 1);
@@ -179,14 +150,16 @@ let wrapper (x, t) =
 	let y = gentmp t in
 	  FunDef({ name = Id.L(x);
 		   args = [(y, t)];
-		   body = block (insert_return (Seq(Dec(("b", Box), None), 
-						    Seq(Assign(Field("b", "p"), CallDir(Var("GC_malloc"), [Sizeof(t)])),
-							Seq(Assign(Deref(Cast(Pointer(t), Field("b", "p"))), Var(y)),
-							    Exp(Var("b")))))));
-		 ret = r })
-    | t -> failwith ("invalid type : " ^ (string_of_type t))
+		   body = block (insert_return Box (Seq(Dec(("p", Box), None), 
+							Seq(Assign(Var("p"), CallDir(Var("new_sp"), [Sizeof(t)])),
+							    Seq(Assign(Deref(Cast(Pointer(t), CallDir(Var("sp_get"), [Var("p")]))), Var(y)),
+								Exp(Var("p")))))));
+		   ret = r },
+		ref false)
+    | NameTy(_, t) -> wrapper (x, t)
+    | t -> D.printf "invalid type : %s\n" (string_of_type t); assert false
 
-let unwrapper (x, t) =
+let rec unwrapper (x, t) =
   match t with
     | Fun(args, r) ->
 	assert(List.length args = 1);
@@ -194,8 +167,10 @@ let unwrapper (x, t) =
 	let y = gentmp t in
 	  FunDef({ name = Id.L(x);
 		   args = [(y, t)];
-		   body = block (insert_return (Exp(Deref(Cast(Pointer(r), Field(y, "p"))))));
-		 ret = r })
+		   body = block (insert_return r (Exp(Deref(Cast(Pointer(r), CallDir(Var("sp_get"), [Var(y)]))))));
+		 ret = r }, 
+		ref false)
+    | NameTy(_, t) -> unwrapper (x, t)
     | t -> failwith ("invalid type : " ^ (string_of_type t))
 
 let rec concat e1 xt e2 = match e1 with
@@ -218,18 +193,41 @@ let make_closure t =
 	  let s' = List.fold_right (fun (x, t) s -> (Seq(Assign(Field(c, x), Var(x)), s))) xts (Exp(Var(c))) in
 	    xts, Seq(Dec((c, t), None), s')
       | _ -> Printf.eprintf "invalid type : %s\n" (string_of_type t); assert false in
-    name, FunDef({ name = Id.L(name); args = args; body = block (insert_return body); ret = t })
+    name, FunDef({ name = Id.L(name); args = args; body = block (insert_return t body); ret = t }, ref false)
 
+let applyer_name t = "apply_" ^ (string_of_type t)
 let rec apply_closure t args =  
   let x = gentmp t in
-  let name = "apply_" ^ (string_of_type t) in
+  let name = applyer_name t in
   let args = (x, t) :: (List.map (fun t -> gentmp t, t) args) in
   let (f, t'), zts = match t with NameTy(_, Struct(xt::xts)) -> (xt, xts) | _ -> Printf.eprintf "invalid type : %s\n" (string_of_type t); assert false in
   let ret = match t' with Fun(_, ret) -> ret | _ -> assert false in
   let body = Exp(CallDir(Field(x, f), (List.map (fun (y, _) -> Var(y)) (List.tl args)) @ (List.map (fun (z, _) -> Field(x, z)) zts))) in
-    ret, FunDef({ name = Id.L(name); args = args; body = block (insert_return body); ret = ret })
+    ret, FunDef({ name = Id.L(name); args = args; body = block (insert_return ret body); ret = ret }, ref false)
 
-(* ·¿ÊÑ´¹ *)
+let find_typedef t = 
+  List.find (fun def -> match def with | TypeDef((x, t'), _ )-> is_ty_equal t t' | _ -> false) !toplevel
+
+let find_namety t = 
+  match find_typedef t with
+    | TypeDef((name, t), _) -> NameTy(name, t)
+    | _ -> assert false
+	
+let namety t =
+  try
+    find_namety t
+  with
+      Not_found ->
+	let name = (gentmp t) ^ "_t" in
+	  toplevel := TypeDef((name, t), ref false) :: !toplevel;
+	  NameTy(name, t)
+	    
+let rec return_ty = function
+  | Fun(_, ret) -> ret
+  | NameTy(_, t) -> return_ty t
+  | _ -> assert false
+	  
+(* åž‹å¤‰æ› *)
 let rec k t = 
   let _ = D.printf "C.k %s\n" (Type.string_of_typ t) in
   match t with
@@ -237,19 +235,15 @@ let rec k t =
   | Type.App(Type.Unit, []) -> Void
   | Type.App(Type.Bool, []) -> Bool
   | Type.App(Type.Int, []) -> Int
-  | Type.App(Type.Arrow, xs) -> Fun(List.map k (L.init xs), k (L.last xs))
+  | Type.App(Type.Arrow, xs) -> namety (Fun(List.map k (L.init xs), k (L.last xs))) (* Funåž‹ã«ã¯åå‰ã‚’ã¤ã‘ã‚‹ *)
   | Type.App(Type.TyFun(_, _), _) -> assert false (* not implemented. is possible ? *)
   | Type.Poly([], t) -> k t
   | Type.Poly _ -> assert false (* not implemented *)
   | Type.Meta _ -> assert false (* not implemented *)
   | _ -> assert false
 
-let find_closure_def yts t = 
-    let typedef = List.find (fun def -> match def with TypeDef(_, Struct(("f", t') :: yts')) -> (is_ty_equal t t') && (try List.for_all2 (fun (y, t) (y', t') -> (is_ty_equal t t')) yts yts' with Invalid_argument _ -> false)  | _ -> false) !toplevel in
-      match typedef with
-	| TypeDef(name, t) -> NameTy(name, t)
-	| _ -> assert false
-
+let find_closure_ty yts t = find_namety (Struct(("f", t) :: yts))
+  
 let rec closure_ty yts t = match t with
   | Fun(args, ret) -> 
       let name = (Id.genid "closure") ^ "_t" in name, Struct(("f", t) :: yts)
@@ -270,10 +264,10 @@ let rec split = function
 	  | None -> Some(s1), e2')
   | Block(_, s) -> split s
 
-(* ²þÌ¾¡£²þÌ¾¥Þ¥Ã¥×¤Ë ID.t ¤¬¤¢¤ì¤Ð²þÌ¾¸å¤ÎÌ¾Á°¤òÊÖ¤¹¡£¤Ê¤±¤ì¤Ð¡¢¸µ¤ÎÌ¾Á°¤òÊÖ¤¹¡£*)      
+(* æ”¹åã€‚æ”¹åãƒžãƒƒãƒ—ã« ID.t ãŒã‚ã‚Œã°æ”¹åå¾Œã®åå‰ã‚’è¿”ã™ã€‚ãªã‘ã‚Œã°ã€å…ƒã®åå‰ã‚’è¿”ã™ã€‚*)      
 let rename m x = if M.mem x m then M.find x m else x
    
-let rec g env ids e = (* C¸À¸ì¥³¡¼¥ÉÀ¸À® (caml2html: virtual_g) *)
+let rec g env ids e = (* Cè¨€èªžã‚³ãƒ¼ãƒ‰ç”Ÿæˆ (caml2html: c_g) *)
   let _ = D.printf "C.g %s\n" (Closure.string_of_exp e) in
   match e with 
   | Closure.Unit -> Exp(Nop), Void
@@ -340,63 +334,74 @@ let rec g env ids e = (* C¸À¸ì¥³¡¼¥ÉÀ¸À® (caml2html: virtual_g) *)
   | Closure.Var(x) -> 
       let x = rename ids x in 
 	Exp(Var(x)), (M.find x env)
-  | Closure.MakeCls((x, _), { Closure.entry = Id.L(l); Closure.actual_fv = ys }, e2) -> (* ¥¯¥í¡¼¥¸¥ã¤ÎÀ¸À® (caml2html: c_makecls) *)
+  | Closure.MakeCls((x, _), { Closure.entry = Id.L(l); Closure.actual_fv = ys }, e2) -> (* ã‚¯ãƒ­ãƒ¼ã‚¸ãƒ£ã®ç”Ÿæˆ (caml2html: c_makecls) *)
       let ys = List.map (rename ids) ys in
       let yts = List.map (fun y -> (y, M.find y env)) ys in
-      let t, maker = 
+      let t, maker =
 	(try
-	    let t = find_closure_def yts (M.find l env) in
+	    let t = find_closure_ty yts (M.find l env) in
 	    let maker = maker_name t in
 	      t, maker
 	  with
 	      Not_found ->
-		let name, t = closure_ty yts (M.find l env) in (* (x, t) ¤Î·¿ t ¤Ï Type.Arrow¡Ê´Ø¿ô¡Ë·¿¤Ê¤Î¤Ç·¿´Ä¶­¤«¤é¥È¥Ã¥×¥ì¥Ù¥ë¤Î·¿¤ò°ú¤¤¤Æ¥¯¥í¡¼¥¸¥ã·¿¤ËÊÑ´¹¤¹¤ë *)
-		  toplevel := TypeDef(name, t) :: !toplevel;
+		let name, t = closure_ty yts (M.find l env) in (* (x, t) ã®åž‹ t ã¯ Type.Arrowï¼ˆé–¢æ•°ï¼‰åž‹ãªã®ã§åž‹ç’°å¢ƒã‹ã‚‰ãƒˆãƒƒãƒ—ãƒ¬ãƒ™ãƒ«ã®åž‹ã‚’å¼•ã„ã¦ã‚¯ãƒ­ãƒ¼ã‚¸ãƒ£åž‹ã«å¤‰æ›ã™ã‚‹ *)
+		  toplevel := TypeDef((name, t), ref false) :: !toplevel;
 		  let t = NameTy(name, t) in
 		  let maker, fundef = make_closure t in
 		    toplevel := fundef :: !toplevel;
 		    t, maker) in
-      let x' = gentmp t in (* ¥¯¥í¡¼¥¸¥ã¤Ï¥È¥Ã¥×¥ì¥Ù¥ë´Ø¿ô¤ÈÌ¾Á°¤¬Èï¤Ã¤Æ¤¤¤ë¤Î¤Ç²þÌ¾¤¹¤ë *)
+      let x' = gentmp t in (* ã‚¯ãƒ­ãƒ¼ã‚¸ãƒ£ã¯ãƒˆãƒƒãƒ—ãƒ¬ãƒ™ãƒ«é–¢æ•°ã¨åå‰ãŒè¢«ã£ã¦ã„ã‚‹ã®ã§æ”¹åã™ã‚‹ *)
       let e2', t2 = g (M.add x' t env) (M.add x x' ids) e2 in
 	Seq(Dec((x', t), Some(MakeClosure(Id.L(maker), l, yts))), e2'), t2
   | Closure.AppCls(x, ys) -> 
       let x = rename ids x in
       let ys = List.map (rename ids) ys in
-      let t = M.find x env in
-	begin
-	  match t with 
-	    | NameTy(_, Struct(_)) -> 
-		let ret, fundef = apply_closure t (List.map (fun y -> (M.find y env)) ys) in
-		  toplevel := fundef :: !toplevel;
-		  Exp(CallCls((x, t), ys)), ret
-	    | Fun(args, rt) ->
-		assert(List.for_all2 is_ty_equal (List.map (fun y -> M.find y env) ys) args);
-		Exp(CallDir(Var(x), List.map (fun y -> Var(y)) ys)), rt
-	    | _ -> Printf.eprintf "invalid type : %s\n" (string_of_type t); assert false
-	end
+      let rec app_cls t = 
+	match t with 
+	  | NameTy(_, Struct(_)) -> 
+	      let ret, fundef = apply_closure t (List.map (fun y -> (M.find y env)) ys) in
+		toplevel := fundef :: !toplevel;
+		Exp(CallDir(Var(applyer_name t), Var(x) :: List.map (fun y -> Var(y)) ys)), ret
+	  | NameTy(_, t) -> app_cls t
+	  | Fun(args, rt) ->
+	      assert(List.for_all2 is_ty_equal (List.map (fun y -> M.find y env) ys) args);
+	      Exp(CallDir(Var(x), List.map (fun y -> Var(y)) ys)), rt
+	  | _ -> Printf.eprintf "invalid type : %s\n" (string_of_type t); assert false in
+	app_cls (M.find x env)
   | Closure.AppDir(Id.L(l), ys) -> 
       let ys = List.map (rename ids) ys in
-      let t = match M.find l env with Fun(_, ret) -> ret | _ -> assert false in
+      let t = return_ty (M.find l env) in
 	Exp(CallDir(Var(l), List.map (fun y -> Var(y)) ys)), t
 
-(* ¥È¥Ã¥×¥ì¥Ù¥ë´Ø¿ô¤Î C ¸À¸ìÊÑ´¹ (caml2html: c_h) *)
+(* ãƒˆãƒƒãƒ—ãƒ¬ãƒ™ãƒ«é–¢æ•°ã® C è¨€èªžå¤‰æ› (caml2html: c_h) *)
 let h env { Closure.name = (Id.L(x), t); Closure.args = yts; Closure.formal_fv = zts; Closure.body = e } =
+  let () = D.printf "C.h (Id.L(%s), %s)\n" x (Type.string_of_typ t) in
   let yts = List.map (fun (y, t) -> (y, k t)) yts in
   let zts = List.map (fun (z, t) -> (z, k t)) zts in
   let body, t' = g (M.add x (k t) (M.add_list yts (M.add_list zts env))) M.empty e in 
     match t with
       | Type.App(Type.Arrow, _) ->
-	  (* Ìá¤êÃÍ¤¬¥¯¥í¡¼¥¸¥ã¤Ë¤Ê¤Ã¤Æ¤¤¤ë¥±¡¼¥¹¤¬¤¢¤ë¤Î¤Ç¡¢¥·¥°¥Í¥Á¥ã¤Î·¿¤Ç¤Ï¤Ê¤¯ÊÑ´¹¸å¤ÎÊý¤ò»ÈÍÑ¤¹¤ë¡£¤¿¤À¤··¿´Ä¶­¤Ë¤ÏÊÑ´¹Á°¤ÎÊý¤òÆþ¤ì¤Æ¤¤¤ë¤Î¤ÇºÆµ¢´Ø¿ô¤Ë¤Ä¤¤¤Æ¤ÏºÆ¹Í¤¬É¬Í× *)
-	  toplevel := FunDef({ name = Id.L(x); args = yts @ zts; body = block (insert_return body); ret = t' }) :: !toplevel; 
+	  (* æˆ»ã‚Šå€¤ãŒã‚¯ãƒ­ãƒ¼ã‚¸ãƒ£ã«ãªã£ã¦ã„ã‚‹ã‚±ãƒ¼ã‚¹ãŒã‚ã‚‹ã®ã§ã€ã‚·ã‚°ãƒãƒãƒ£ã®åž‹ã§ã¯ãªãå¤‰æ›å¾Œã®æ–¹ã‚’ä½¿ç”¨ã™ã‚‹ã€‚ãŸã ã—åž‹ç’°å¢ƒã«ã¯å¤‰æ›å‰ã®æ–¹ã‚’å…¥ã‚Œã¦ã„ã‚‹ã®ã§å†å¸°é–¢æ•°ã«ã¤ã„ã¦ã¯å†è€ƒãŒå¿…è¦ *)
+	  let body' = block (insert_return t' body) in
+	    toplevel := FunDef({ name = Id.L(x); args = yts @ zts; body = body'; ret = t' }, ref false) :: !toplevel; 
 	  M.add x (Fun(List.map snd (yts @ zts), t')) env
-      | _ -> assert false
+      | _ -> Printf.eprintf "invalid type : %s\n" (Type.string_of_typ t); assert false
       
-(* ¥×¥í¥°¥é¥àÁ´ÂÎ¤Î²¾ÁÛ¥Þ¥·¥ó¥³¡¼¥ÉÀ¸À® (caml2html: virtual_f) *)
+(* ãƒ—ãƒ­ã‚°ãƒ©ãƒ å…¨ä½“ã®Cã‚³ãƒ¼ãƒ‰ç”Ÿæˆ (caml2html: c_f) *)
 let f (Closure.Prog(defs, e)) =
-  List.iter (fun (x, t) -> toplevel := wrapper (x, k t) :: !toplevel) (Wrap.wrapper_list ());
-  List.iter (fun (x, t) -> toplevel := unwrapper (x, k t) :: !toplevel) (Wrap.unwrapper_list ());
+  (* åž‹å¤‰æ›ã® k ã§ toplevel ã« TypeDef ã‚’è¿½åŠ ã™ã‚‹å¯èƒ½æ€§ãŒã‚ã‚‹ã®ã§ã€å¿…ãš k ã®çµæžœã‚’ let ã§æŸç¸›ã—ã¦ã‹ã‚‰ toplevel ã‚’è©•ä¾¡ã™ã‚‹ã“ã¨ *)
+  List.iter (fun (x, t) -> let w = wrapper (x, k t) in toplevel := w :: !toplevel) (Wrap.wrapper_list ());
+  List.iter (fun (x, t) -> let u = unwrapper (x, k t) in toplevel := u :: !toplevel) (Wrap.unwrapper_list ());
   let env = (M.map k !Typing.extenv) in
   let env' = List.fold_left h env defs in
   let e, _ = g env' M.empty e in
-    (string_of_prog (Prog(List.rev !toplevel, e)))
-      
+  let main = FunDef({ name = Id.L("main");
+		      args = [];
+		      body = block (insert_return Int 
+				       (if !enable_gc then
+					 (Seq(Exp(CallDir(Var("GC_init"), [])), (Seq(e, Exp(IntExp(0))))))
+					 else
+					   (Seq(e, Exp(IntExp(0))))));
+		      ret = Int }, 
+		   ref true) in
+    (Prog(List.rev !toplevel @ [main]))

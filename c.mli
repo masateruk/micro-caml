@@ -33,7 +33,6 @@ and exp =
   | Var of Id.t
   | CondEq of Id.t * Id.t * exp * exp
   | CondLE of Id.t * Id.t * exp * exp
-  | CallCls of (Id.t * ty) * Id.t list
   | CallDir of exp * exp list
   | MakeClosure of Id.l * Id.t * (Id.t * ty) list
   | Field of Id.t * Id.t
@@ -47,7 +46,10 @@ type fundef = {
   body : t;
   ret : ty;
 }
-type def = FunDef of fundef | TypeDef of (Id.t * ty)
-type prog = Prog of def list * t
+type def = FunDef of fundef * bool ref | TypeDef of (Id.t * ty) * bool ref
+type prog = Prog of def list
   
-val f : Closure.prog -> string
+val is_ty_equal : ty -> ty -> bool
+val enable_gc : bool ref
+val f : Closure.prog -> prog
+

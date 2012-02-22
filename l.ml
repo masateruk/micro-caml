@@ -7,3 +7,4 @@ let rec init = function
   | (x::xs) -> x :: (init xs)
       
 let last xs = List.hd (List.rev xs)
+

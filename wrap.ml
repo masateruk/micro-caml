@@ -12,36 +12,41 @@ let unwrappers = ref MapSet.empty
 
 let wrapper_list () = List.map snd (MapSet.bindings !wrappers)
 let unwrapper_list () = List.map snd (MapSet.bindings !unwrappers)
-  
-let add_wrapper t wrappers = 
-  if MapSet.mem t wrappers then
-    wrappers
-  else
-    let name, t' = 
-      match t with
-	| Type.App(Type.Bool, []) -> "wrap_bool", Type.App(Type.Arrow, [t; Type.Var(Type.newtyvar ())])
-	| Type.App(Type.Int, []) -> "wrap_int", Type.App(Type.Arrow, [t; Type.Var(Type.newtyvar ())])
-	| Type.App(Type.Arrow, us) -> "wrap_closure" ^ (Id.genid ""), Type.App(Type.Arrow, (t :: List.map (fun _ -> Type.Var(Type.newtyvar ())) us))
-	| _ -> Printf.eprintf "not implemented.\n"; assert false in
-      MapSet.add t (name, t') wrappers
-    
-let wrapper t = fst (MapSet.find t !wrappers)
-let type_of_wrapper t = snd (MapSet.find t !wrappers)
 
-let add_unwrapper t unwrappers = 
-  if MapSet.mem t unwrappers then
-    unwrappers
-  else
-    let name, t' = 
-      match t with
-	| Type.App(Type.Bool, []) -> "uwrap_bool", Type.App(Type.Arrow, [Type.Var(Type.newtyvar ()); t])
-	| Type.App(Type.Int, []) -> "unwrap_int", Type.App(Type.Arrow, [Type.Var(Type.newtyvar ()); t])
-	| Type.App(Type.Arrow, us) -> "unwrap_closure" ^ (Id.genid ""), Type.App(Type.Arrow, ((List.map (fun _ -> Type.Var(Type.newtyvar ())) us) @ [t]))
-	| _ -> Printf.eprintf "not implemented.\n"; assert false in
-      MapSet.add t (name,  t') unwrappers
+let new_wrapper t = 
+  match t with
+    | Type.App(Type.Bool, []) -> "wrap_bool", Type.App(Type.Arrow, [t; Type.Var(Type.newtyvar ())])
+    | Type.App(Type.Int, []) -> "wrap_int", Type.App(Type.Arrow, [t; Type.Var(Type.newtyvar ())])
+    | Type.App(Type.Arrow, us) -> 
+	let us' = [(Type.App(Type.Arrow, (List.map (fun _ -> (Type.Var(Type.newtyvar ()))) us))); (Type.Var(Type.newtyvar ()))] in
+	  "wrap_closure" ^ (Id.genid ""), (Type.App(Type.Arrow, us'))
+    | _ -> Printf.eprintf "not implemented.\n"; assert false
+  
+let wrapper t = 
+  try
+    fst (MapSet.find t !wrappers)
+  with
+      Not_found ->
+	let name, t' = new_wrapper t in
+	  wrappers := MapSet.add t (name, t') !wrappers;
+	  name
+
+let new_unwrapper t = 
+  match t with
+    | Type.App(Type.Bool, []) -> "uwrap_bool", Type.App(Type.Arrow, [Type.Var(Type.newtyvar ()); t])
+    | Type.App(Type.Int, []) -> "unwrap_int", Type.App(Type.Arrow, [Type.Var(Type.newtyvar ()); t])
+    | Type.App(Type.Arrow, us) -> "unwrap_closure" ^ (Id.genid ""), Type.App(Type.Arrow, [Type.Var(Type.newtyvar ());
+											  (Type.App(Type.Arrow, (List.map (fun _ -> Type.Var(Type.newtyvar ())) us)))])
+    | _ -> Printf.eprintf "not implemented.\n"; assert false
 	
-let unwrapper t = fst (MapSet.find t !unwrappers)
-let type_of_unwrapper t = snd (MapSet.find t !unwrappers)
+let unwrapper t = 
+  try
+    fst (MapSet.find t !unwrappers)
+  with
+      Not_found ->
+	let name, t' = new_unwrapper t in
+	  unwrappers := MapSet.add t (name,  t') !unwrappers;
+	  name
 
 let rec has_tyvar t = match t with
   | Type.Var _ -> true
@@ -51,40 +56,40 @@ let rec has_tyvar t = match t with
   | Type.Meta({ contents = None }) -> false
   | Type.Meta({ contents = Some(t') }) -> has_tyvar t'
   
-(* ´Ø¿ôÅ¬±þ»þ¤Î°ú¿ô¤ÎÊñ¤ß¹þ¤ß¡£TigerËÜ¤Î p.345 *)
+(* é–¢æ•°é©å¿œæ™‚ã®å¼•æ•°ã®åŒ…ã¿è¾¼ã¿ã€‚Tigeræœ¬ã® p.345 *)
 let rec wrap (e, s) t = 
-  let _ = D.printf "Typing.wrap \n  (e = %s,\n   s = %s)\n  t = %s\n" (string_of_exp e) (Type.string_of_typ s) (Type.string_of_typ t) in
+  let _ = D.printf "Wrap.wrap \n  (e = %s,\n   s = %s)\n  ,t = %s\n" (string_of_exp e) (Type.string_of_typ s) (Type.string_of_typ t) in
     match s, t with
       | Type.Poly([], s), t -> wrap (e, s) t
       | s, Type.Poly([], t) -> wrap (e, s) t
       | Type.Var _, Type.Var _ -> e
       | Type.App(Type.Bool, []), Type.Var _ -> 
-	  wrappers := add_wrapper s !wrappers;
 	  App(Var(wrapper s), [e])
       | Type.App(Type.Int, []), Type.Var _ -> 
-	  wrappers := add_wrapper s !wrappers;
 	  App(Var(wrapper s), [e])
       | Type.App(Type.Arrow, us), Type.Var _ -> 
-	  wrappers := add_wrapper (L.last us) !wrappers;
 	  let yts = List.map (fun u -> (Id.gentmp u, Type.Var(Type.newtyvar ()))) (L.init us) in
+	  let r = Type.Var(Type.newtyvar ()) in
+	  let e' = 
 	    App(Var(wrapper s), 
-	       [LetRec({ name = ("fw", t); 
-			 args = yts;
-			 body = wrap (App(e, List.map2 (fun (y, t) u -> unwrap (Var(y), t) u) yts (L.init us)), (L.last us)) (Type.Var(Type.newtyvar ())) },
-		       Var("fw"))])
+		[LetRec({ name = ("fw", Type.App(Type.Arrow, (List.map snd yts) @ [r])); 
+			  args = yts;
+			  body = wrap (App(e, List.map2 (fun (y, t) u -> unwrap (Var(y), t) u) yts (L.init us)), (L.last us)) r },
+			Var("fw"))]) in
+	  let () = D.printf "e' = %s\n" (ocaml_of_exp e') in
+	    e'
       | Type.App(Type.Arrow, us), Type.App(Type.Arrow, vs) when has_tyvar t ->
 	  let yts = List.map (fun v -> (Id.gentmp v, v)) (L.init vs) in
 	    begin
 	      match (L.last vs) with
 		| Type.Var _ -> 
-		    wrappers := add_wrapper (L.last us) !wrappers;
-		    LetRec({ name = ("fw", t);
+		    LetRec({ name = ("fw", Type.App(Type.Arrow, (List.map snd yts) @ [L.last vs])); 
 			     args = yts;
 			     body = wrap 
 			       (App(e, List.map2 (fun (y, t) u -> unwrap (Var(y), t) u) yts (L.init us)), (L.last us)) (L.last vs) },
 			   Var("fw"))
 		| r -> 
-		    LetRec({ name = ("fw", t);
+		    LetRec({ name = ("fw", Type.App(Type.Arrow, (List.map snd yts) @ [r])); 
 			     args = yts;
 			     body = unwrap (App(e, List.map2 (fun (y, t) u -> unwrap (Var(y), t) u) yts (L.init us)), (L.last us)) r }, 
 			   Var("fw"))
@@ -93,28 +98,34 @@ let rec wrap (e, s) t =
       | _ -> Printf.eprintf "not implemented.\n"; assert false
 	  
 and unwrap (e, s) t = 
-  let _ = D.printf "Typing.unwrap \n  (e = %s,\n   s = %s)\n  t = %s\n" (string_of_exp e) (Type.string_of_typ s) (Type.string_of_typ t) in
+  let _ = D.printf "Wrap.unwrap \n  (e = %s,\n   s = %s)\n  ,t = %s\n" (string_of_exp e) (Type.string_of_typ s) (Type.string_of_typ t) in
     match s, t with
+      | Type.Poly([], s), t -> unwrap (e, s) t
+      | s, Type.Poly([], t) -> unwrap (e, s) t
       | Type.Var _, Type.Var _ -> e
       | Type.Var _, Type.App(Type.Bool, []) -> 
-	  unwrappers := add_unwrapper t !unwrappers;
 	  App(Var(unwrapper t), [e])
       | Type.Var _, Type.App(Type.Int, []) -> 
-	  unwrappers := add_unwrapper t !unwrappers;
 	  App(Var(unwrapper t), [e])
-      | Type.Var _, Type.App(Type.Arrow, us) -> 
-	  unwrappers := add_unwrapper (L.last us) !unwrappers;
-	  let yts = List.map (fun u -> (Id.gentmp u, u)) (L.init us) in
-	    LetRec({ name = ("fu",  t);
-		     args = yts;
-		     body = (unwrap ((App(Var(unwrapper t), [App(e, List.map2 (fun (y, t) u -> wrap (Var(y), t) u) yts (L.init us))])), (type_of_unwrapper t)) t) },
-		  Var("fu"))
+      | Type.Var _, Type.App(Type.Arrow, vs) ->
+	  let e' = 
+	    let yts = List.map (fun v -> (Id.gentmp v, v)) (L.init vs) in
+	      LetRec({ name = ("fu", t);
+		       args = yts;
+		       body =
+			 let t' = List.map (fun _ -> Type.Var(Type.newtyvar ())) vs in
+			 let e' = unwrap (e, Type.App(Type.Arrow, t')) t in
+			   unwrap (App(e', (List.map2 (fun (y, t) t' -> wrap (Var(y), t) t') yts (L.init t'))), (L.last t')) (L.last vs) },
+		     Var("fu")) in
+	    e'
+      | Type.App(Type.Arrow, us), Type.App(Type.Arrow, vs) when has_tyvar s ->
+	    App(Var(unwrapper t), [e])
       | s, t when s = t -> e
       | _ -> Printf.eprintf "not implemented.\n"; assert false
 
 
 let subst_map s t =
-  let _ = D.printf "Typing.subst_map %s %s\n" (Type.string_of_typ s) (Type.string_of_typ t) in
+  let _ = D.printf "Wrap.subst_map %s %s\n" (Type.string_of_typ s) (Type.string_of_typ t) in
   let rec loop s t xs =
     match s, t with 
       | Type.Var(v), _ -> (v, t) :: xs
@@ -127,7 +138,7 @@ let subst_map s t =
     loop s t []
     
 let rec g env e =
-  let _ = D.printf "Typing.h %s\n" (string_of_exp e) in
+  let _ = D.printf "Wrap.g %s\n" (string_of_exp e) in
   match e with
   | Unit -> Unit, Type.App(Type.Unit, [])
   | Bool(b) -> Bool(b), Type.App(Type.Bool, [])

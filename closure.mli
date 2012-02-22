@@ -27,6 +27,5 @@ type fundef = {
 type prog = Prog of fundef list * t
 
 val string_of_exp : t -> string
-val string_of_prog : prog -> string
 val fv : t -> S.t
 val f : KNormal.t -> prog

@@ -1,4 +1,4 @@
-type t = (* MinCaml¤Î¹½Ê¸¤òÉ½¸½¤¹¤ë¥Ç¡¼¥¿·¿ (caml2html: syntax_t) *)
+type t = (* uCamlã®æ§‹æ–‡ã‚’è¡¨ç¾ã™ã‚‹ãƒ‡ãƒ¼ã‚¿åž‹ (caml2html: syntax_t) *)
   | Unit
   | Nil of Type.t
   | Bool of bool
@@ -40,3 +40,27 @@ let rec string_of_exp = function
   | App(e, es) -> "App(" ^ (string_of_exp e) ^ " (" ^ (String.concat ", " (List.map string_of_exp es)) ^ "))"
 
     
+let rec ocaml_of_exp = function
+  | Unit -> "()"
+  | Nil(t) -> "[] (* : " ^ (Type.string_of_typ t) ^ "*)"
+  | Bool(b) -> (string_of_bool b)
+  | Int(n) -> (string_of_int n)
+  | Not(e) -> "not " ^ (ocaml_of_exp e)
+  | Neg(e) -> "- " ^ (ocaml_of_exp e)
+  | Add(e1, e2) -> (ocaml_of_exp e1) ^ " + " ^ (ocaml_of_exp e2)
+  | Sub(e1, e2) -> (ocaml_of_exp e1) ^ " - " ^ (ocaml_of_exp e2)
+  | Mul(e1, e2) -> (ocaml_of_exp e1) ^ " * " ^ (ocaml_of_exp e2)
+  | Div(e1, e2) -> (ocaml_of_exp e1) ^ " / " ^ (ocaml_of_exp e2)
+  | Cons(e1, e2) -> (ocaml_of_exp e1) ^ " :: " ^ (ocaml_of_exp e2)
+  | Eq(e1, e2) -> (ocaml_of_exp e1) ^ " = " ^ (ocaml_of_exp e2)
+  | LE(e1, e2) -> (ocaml_of_exp e1) ^ " <= " ^ (ocaml_of_exp e2)
+  | If(e1, e2, e3) -> "if " ^ (ocaml_of_exp e1) ^ " then\n" ^ (ocaml_of_exp e2) ^ " else\n" ^ (ocaml_of_exp e3)
+  | Let((x, t), e1, e2) -> "let " ^ x ^ " (* : " ^ (Type.string_of_typ t) ^ "*) =\n" ^ (ocaml_of_exp e1) ^ " in\n" ^ (ocaml_of_exp e2)
+  | Var(x) -> x
+  | LetRec({ name = (x, t); args = yts; body = e1 }, e2) -> 
+      "let rec " ^ x ^ " " ^ 
+	(String.concat ", " (List.map (fun (y, t) -> y ^ " (* : " ^ (Type.string_of_typ t) ^ "*)" ) yts)) ^ " (* : " ^ 
+	(Type.string_of_typ (match t with Type.App(Type.Arrow, us) -> L.last us | t -> t)) ^ "*) =\n" ^ 
+	(ocaml_of_exp e1) ^ " in\n" ^ (ocaml_of_exp e2)
+  | App(e, es) -> "(" ^ (ocaml_of_exp e) ^ " " ^ (String.concat " " (List.map ocaml_of_exp es)) ^ ")"
+
