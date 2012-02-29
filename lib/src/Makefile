@@ -21,7 +21,7 @@ MINOR = 0
 
 CC = gcc
 CFLAGS = -g -Wall -I../include
-TRASH = *.o *.so
+TRASH = *.o *.so *.dylib
 
 all:$(RESULT)
 

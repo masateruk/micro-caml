@@ -11,8 +11,7 @@ type t =
   | Dec of (Id.t * ty) * exp option
   | Assign of exp * exp
   | Exp of exp
-  | IfEq of Id.t * Id.t * t * t
-  | IfLE of Id.t * Id.t * t * t
+  | If of exp * t * t
   | Return of exp
   | Seq of t * t
   | Block of dec list * t
@@ -23,23 +22,26 @@ and exp =
   | Nil of ty
   | BoolExp of bool
   | IntExp of int
-  | Not of Id.t
-  | Neg of Id.t
-  | Add of Id.t * Id.t
-  | Sub of Id.t * Id.t
-  | Mul of Id.t * Id.t
-  | Div of Id.t * Id.t
+  | Not of exp
+  | Neg of exp
+  | Add of exp * exp
+  | Sub of exp * exp
+  | Mul of exp * exp
+  | Div of exp * exp
+  | Eq of exp * exp
+  | LE of exp * exp
   | Cons of Id.t * Id.t
   | Var of Id.t
-  | CondEq of Id.t * Id.t * exp * exp
-  | CondLE of Id.t * Id.t * exp * exp
+  | Cond of exp * exp * exp
   | CallDir of exp * exp list
+  | Let of (Id.t * ty) * exp * exp
   | MakeClosure of Id.l * Id.t * (Id.t * ty) list
   | Field of Id.t * Id.t
   | Sizeof of ty
   | Ref of exp
   | Deref of exp
   | Cast of ty * exp
+  | Comma
 type fundef = {
   name : Id.l;
   args : (Id.t * ty) list;

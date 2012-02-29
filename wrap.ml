@@ -15,11 +15,11 @@ let unwrapper_list () = List.map snd (MapSet.bindings !unwrappers)
 
 let new_wrapper t = 
   match t with
-    | Type.App(Type.Bool, []) -> "wrap_bool", Type.App(Type.Arrow, [t; Type.Var(Type.newtyvar ())])
-    | Type.App(Type.Int, []) -> "wrap_int", Type.App(Type.Arrow, [t; Type.Var(Type.newtyvar ())])
+    | Type.App(Type.Bool, []) -> "_wrap_bool", Type.App(Type.Arrow, [t; Type.Var(Type.newtyvar ())])
+    | Type.App(Type.Int, []) -> "_wrap_int", Type.App(Type.Arrow, [t; Type.Var(Type.newtyvar ())])
     | Type.App(Type.Arrow, us) -> 
 	let us' = [(Type.App(Type.Arrow, (List.map (fun _ -> (Type.Var(Type.newtyvar ()))) us))); (Type.Var(Type.newtyvar ()))] in
-	  "wrap_closure" ^ (Id.genid ""), (Type.App(Type.Arrow, us'))
+	  "_wrap_closure" ^ (Id.genid ""), (Type.App(Type.Arrow, us'))
     | _ -> Printf.eprintf "not implemented.\n"; assert false
   
 let wrapper t = 
@@ -33,9 +33,9 @@ let wrapper t =
 
 let new_unwrapper t = 
   match t with
-    | Type.App(Type.Bool, []) -> "uwrap_bool", Type.App(Type.Arrow, [Type.Var(Type.newtyvar ()); t])
-    | Type.App(Type.Int, []) -> "unwrap_int", Type.App(Type.Arrow, [Type.Var(Type.newtyvar ()); t])
-    | Type.App(Type.Arrow, us) -> "unwrap_closure" ^ (Id.genid ""), Type.App(Type.Arrow, [Type.Var(Type.newtyvar ());
+    | Type.App(Type.Bool, []) -> "_unwrap_bool", Type.App(Type.Arrow, [Type.Var(Type.newtyvar ()); t])
+    | Type.App(Type.Int, []) -> "_unwrap_int", Type.App(Type.Arrow, [Type.Var(Type.newtyvar ()); t])
+    | Type.App(Type.Arrow, us) -> "_unwrap_closure" ^ (Id.genid ""), Type.App(Type.Arrow, [Type.Var(Type.newtyvar ());
 											  (Type.App(Type.Arrow, (List.map (fun _ -> Type.Var(Type.newtyvar ())) us)))])
     | _ -> Printf.eprintf "not implemented.\n"; assert false
 	
@@ -72,27 +72,26 @@ let rec wrap (e, s) t =
 	  let r = Type.Var(Type.newtyvar ()) in
 	  let e' = 
 	    App(Var(wrapper s), 
-		[LetRec({ name = ("fw", Type.App(Type.Arrow, (List.map snd yts) @ [r])); 
+		[LetRec({ name = ("_fw", Type.App(Type.Arrow, (List.map snd yts) @ [r])); 
 			  args = yts;
 			  body = wrap (App(e, List.map2 (fun (y, t) u -> unwrap (Var(y), t) u) yts (L.init us)), (L.last us)) r },
-			Var("fw"))]) in
-	  let () = D.printf "e' = %s\n" (ocaml_of_exp e') in
+			Var("_fw"))]) in
 	    e'
       | Type.App(Type.Arrow, us), Type.App(Type.Arrow, vs) when has_tyvar t ->
 	  let yts = List.map (fun v -> (Id.gentmp v, v)) (L.init vs) in
 	    begin
 	      match (L.last vs) with
 		| Type.Var _ -> 
-		    LetRec({ name = ("fw", Type.App(Type.Arrow, (List.map snd yts) @ [L.last vs])); 
+		    LetRec({ name = ("_fw", Type.App(Type.Arrow, (List.map snd yts) @ [L.last vs])); 
 			     args = yts;
 			     body = wrap 
 			       (App(e, List.map2 (fun (y, t) u -> unwrap (Var(y), t) u) yts (L.init us)), (L.last us)) (L.last vs) },
-			   Var("fw"))
+			   Var("_fw"))
 		| r -> 
-		    LetRec({ name = ("fw", Type.App(Type.Arrow, (List.map snd yts) @ [r])); 
+		    LetRec({ name = ("_fw", Type.App(Type.Arrow, (List.map snd yts) @ [r])); 
 			     args = yts;
 			     body = unwrap (App(e, List.map2 (fun (y, t) u -> unwrap (Var(y), t) u) yts (L.init us)), (L.last us)) r }, 
-			   Var("fw"))
+			   Var("_fw"))
 	    end
       | s, t when s = t -> e
       | _ -> Printf.eprintf "not implemented.\n"; assert false
@@ -110,13 +109,13 @@ and unwrap (e, s) t =
       | Type.Var _, Type.App(Type.Arrow, vs) ->
 	  let e' = 
 	    let yts = List.map (fun v -> (Id.gentmp v, v)) (L.init vs) in
-	      LetRec({ name = ("fu", t);
+	      LetRec({ name = ("_fu", t);
 		       args = yts;
 		       body =
 			 let t' = List.map (fun _ -> Type.Var(Type.newtyvar ())) vs in
 			 let e' = unwrap (e, Type.App(Type.Arrow, t')) t in
 			   unwrap (App(e', (List.map2 (fun (y, t) t' -> wrap (Var(y), t) t') yts (L.init t'))), (L.last t')) (L.last vs) },
-		     Var("fu")) in
+		     Var("_fu")) in
 	    e'
       | Type.App(Type.Arrow, us), Type.App(Type.Arrow, vs) when has_tyvar s ->
 	    App(Var(unwrapper t), [e])

@@ -19,6 +19,9 @@ full-test: debug-code $(RESULT) lib
 clean-test:
 	make -C test clean
 
+clean-lib:
+	make -C lib clean
+
 lib: 
 	make -C lib
 

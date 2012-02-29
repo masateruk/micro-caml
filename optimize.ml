@@ -25,10 +25,8 @@ and reduce_addref_of_list = function
 	  | Exp(CallDir(Var("add_ref"), [e])) -> 
 	      let reduced, ss' = reduce_release_of_list e ss in
 		if reduced then ss' else s::ss'
-	  | IfEq(x, y, s1, s2) -> 
-	      IfEq(x, y, reduce_addref s1, reduce_addref s2) :: reduce_addref_of_list ss
-	  | IfLE(x, y, s1, s2) -> 
-	      IfLE(x, y, reduce_addref s1, reduce_addref s2) :: reduce_addref_of_list ss
+	  | If(e, s1, s2) -> 
+	      If(e, reduce_addref s1, reduce_addref s2) :: reduce_addref_of_list ss
 	  | Seq _ -> D.printf "invalid argument"; assert false
 	  | Block(decs, s') -> Block(decs, reduce_addref s') :: reduce_addref_of_list ss
 	  | s -> s :: reduce_addref_of_list ss
@@ -40,22 +38,14 @@ and reduce_release_of_list e = function
       begin
 	match s with
 	  | Exp(CallDir(Var("release"), [e'])) when e = e' -> true, reduce_addref_of_list ss
-	  | IfEq(x, y, s1, s2) -> 
+	  | If(e, s1, s2) -> 
 	      let r1, s1' = reduce_release e s1 in
 	      let r2, s2' = reduce_release e s2 in
 		if r1 && r2 then
-		  true, IfEq(x, y, s1', s2') :: reduce_addref_of_list ss
+		  true, If(e, s1', s2') :: reduce_addref_of_list ss
 		else
 		  let r, ss' = reduce_release_of_list e ss in
-		    r, IfEq(x, y, s1, s2) :: ss'
-	  | IfLE(x, y, s1, s2) -> 
-	      let r1, s1' = reduce_release e s1 in
-	      let r2, s2' = reduce_release e s2 in
-		if r1 && r2 then
-		  true, IfLE(x, y, s1', s2') :: reduce_addref_of_list ss
-		else
-		  let r, ss' = reduce_release_of_list e ss in
-		    r, IfLE(x, y, s1, s2) :: ss'
+		    r, If(e, s1, s2) :: ss'
 	  | Seq _ -> D.printf "invalid argument"; assert false
 	  | Block(decs, s') -> 
 	      let r, s'' = reduce_release e s' in
@@ -78,16 +68,19 @@ let mark_ty defs t =
 let rec mark_exp defs = function 
     | Nop | BoolExp _ | IntExp _ -> ()
     | Nil(t) -> mark_ty defs t
-    | Not(x) | Neg(x) -> mark_id defs x
-    | Add(x, y) | Sub(x, y) | Mul(x, y) | Div(x, y) | Cons(x, y) -> mark_id defs x; mark_id defs y
+    | Not(e) | Neg(e) -> mark_exp defs e
+    | Add(e1, e2) | Sub(e1, e2) | Mul(e1, e2) | Div(e1, e2) | Eq(e1, e2) | LE(e1, e2) -> mark_exp defs e1; mark_exp defs e2
+    | Cons(x, y) -> mark_id defs x; mark_id defs y
     | Var(x) -> mark_id defs x
-    | CondEq(x, y, e1, e2) | CondLE(x, y, e1, e2) -> mark_id defs x; mark_id defs y; mark_exp defs e1; mark_exp defs e2
+    | Cond(e, e1, e2) -> mark_exp defs e; mark_exp defs e1; mark_exp defs e2
     | CallDir(e, es) -> mark_exp defs e; List.iter (mark_exp defs) es
+    | Let _ -> assert false
     | MakeClosure(Id.L(x), y, zts) -> mark_id defs x; mark_id defs y; List.iter (fun (z, t) -> mark_id defs z; mark_ty defs t) zts
     | Field(x, y) -> mark_id defs x; mark_id defs y
     | Sizeof(t) -> mark_ty defs t
     | Ref(e) | Deref(e) -> mark_exp defs e
     | Cast(t, e) -> mark_ty defs t; mark_exp defs e
+    | Comma -> assert false
 
 let rec mark_dec defs = function
     | VarDec((x, t), None) -> mark_id defs x; mark_ty defs t
@@ -98,7 +91,7 @@ let rec mark_s defs = function
   | Dec((x, t), Some(e)) -> mark_id defs x; mark_ty defs t; mark_exp defs e
   | Assign(e1, e2) -> mark_exp defs e1; mark_exp defs e2
   | Exp(e) -> mark_exp defs e
-  | IfEq(x, y, s1, s2) | IfLE(x, y, s1, s2) -> mark_id defs x; mark_id defs y; mark_s defs s1; mark_s defs s2;
+  | If(e, s1, s2) -> mark_exp defs e; mark_s defs s1; mark_s defs s2;
   | Return(e) -> mark_exp defs e
   | Seq(s1, s2) -> mark_s defs s1; mark_s defs s2
   | Block(decs, s) -> List.iter (mark_dec defs) decs; mark_s defs s
@@ -113,7 +106,7 @@ let g = function
 	FunDef({ name = Id.L(x);  args = yts; body = reduce_addref s; ret = t }, b)
     | def -> def
 	      
-let f (Prog(defs)) =
+let f (Prog(defs)) = 
   let defs' = List.map g defs in
     List.iter (mark defs') defs';
     Prog(defs')

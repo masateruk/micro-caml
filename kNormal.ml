@@ -1,113 +1,95 @@
 (* give names to intermediate values (K-normalization) *)
+(* 変換後のコードをなるべくオリジナルに近いものにするため、実際にはほとんどK正規形にはしない。 *)
 
 type t = (* K正規化後の式 (caml2html: knormal_t) *)
   | Unit
   | Nil of Type.t
+  | Exp of e
+  | Cons of Id.t * Id.t
+  | If of e * t * t 
+  | Let of (Id.t * Type.t) * t * t
+  | LetRec of fundef * t
+and e =
   | Bool of bool
   | Int of int
-  | Not of Id.t
-  | Neg of Id.t
-  | Add of Id.t * Id.t
-  | Sub of Id.t * Id.t
-  | Mul of Id.t * Id.t
-  | Div of Id.t * Id.t
-  | Cons of Id.t * Id.t
-  | IfEq of Id.t * Id.t * t * t (* 比較 + 分岐 (caml2html: knormal_branch) *)
-  | IfLE of Id.t * Id.t * t * t (* 比較 + 分岐 *)
-  | Let of (Id.t * Type.t) * t * t
+  | Not of e
+  | Neg of e
+  | Add of e * e
+  | Sub of e * e
+  | Mul of e * e
+  | Div of e * e
+  | Eq of e * e
+  | LE of e * e
   | Var of Id.t
-  | LetRec of fundef * t
-  | App of Id.t * Id.t list
-  | ExtFunApp of Id.t * Id.t list
+  | App of e * e list
+  | ExtFunApp of Id.t * e list
 and fundef = { name : Id.t * Type.t; args : (Id.t * Type.t) list; body : t }
 
-let rec ocaml_of_expr = function
-  | Unit -> "()"
+let rec ocaml_of_exp = function
   | Bool(b) -> string_of_bool b
   | Int(n) -> string_of_int n
-  | Not(s) -> "not " ^ s
-  | Neg(s) -> "! " ^ s
-  | Add(s1, s2) -> s1 ^ " + " ^ s2
-  | Sub(s1, s2) -> s1 ^ " - " ^ s2
-  | Mul(s1, s2) -> s1 ^ " * " ^ s2
-  | Div(s1, s2) -> s1 ^ " / " ^ s2
-  | IfEq(s1, s2, e1, e2) -> "if " ^ s1 ^ " = " ^ s2 ^ "\n\tthen " ^ (ocaml_of_expr e1) ^ "\n\telse " ^ (ocaml_of_expr e2)
-  | IfLE(s1, s2, e1, e2) -> "if " ^ s1 ^ " < " ^ s2 ^ "\n\tthen " ^ (ocaml_of_expr e1) ^ "\n\telse " ^ (ocaml_of_expr e2)
+  | Not(e) -> "not " ^ (ocaml_of_exp e)
+  | Neg(e) -> "! " ^ (ocaml_of_exp e)
+  | Add(e1, e2) -> (ocaml_of_exp e1) ^ " + " ^ (ocaml_of_exp e2)
+  | Sub(e1, e2) -> (ocaml_of_exp e1) ^ " - " ^ (ocaml_of_exp e2)
+  | Mul(e1, e2) -> (ocaml_of_exp e1) ^ " * " ^ (ocaml_of_exp e2)
+  | Div(e1, e2) -> (ocaml_of_exp e1) ^ " / " ^ (ocaml_of_exp e2)
+  | Var(x) -> x
+  | Eq(e1, e2) -> (ocaml_of_exp e1) ^ " = " ^ (ocaml_of_exp e2)
+  | LE(e1, e2) -> (ocaml_of_exp e1) ^ " <= " ^ (ocaml_of_exp e2) 
+  | App(e, args) -> "(" ^ (ocaml_of_exp e) ^ " " ^ (String.concat " " (List.map ocaml_of_exp args)) ^ ")"
+  | ExtFunApp(x, args) -> "(" ^ x ^ " " ^ (String.concat " " (List.map ocaml_of_exp args)) ^ ")"
+    
+let rec ocaml_of_expr = function
+  | Unit -> "()"
+  | Nil _ -> "[]"
+  | Exp(e) -> ocaml_of_exp e
+  | Cons _ -> assert false
+  | If(e, e1, e2) -> "if " ^ (ocaml_of_exp e) ^ "\n\tthen " ^ (ocaml_of_expr e1) ^ "\n\telse " ^ (ocaml_of_expr e2)
   | Let((s1, t), e1, e2) -> "\nlet " ^ s1 ^ " : " ^ (Id.ocaml_of_typ  t) ^ " = " ^ (ocaml_of_expr e1) ^ " in\n" ^ (ocaml_of_expr e2)
-  | Var(s) -> s
   | LetRec({ name = (x, t); args = yts; body = e1 }, e2) -> 
       "\nlet rec " ^ x ^ " " ^ (String.concat " " (List.map (fun (y, t) -> y) yts)) ^ " : " ^ (Id.ocaml_of_typ  t) ^ " =\n"
       ^ (ocaml_of_expr e1) ^ " in\n" ^ (ocaml_of_expr e2)
-  | App(s, args) -> "(" ^ s ^ " " ^ (String.concat " " args) ^ ")"
-  | ExtFunApp(s, args) -> "(" ^ s ^ " " ^ (String.concat " " args) ^ ")"
-      
-let insert_let (e, t) k = (* letを挿入する補助関数 (caml2html: knormal_insert) *)
+
+let rec insert_let (e, t) k = (* letを挿入する補助関数 (caml2html: knormal_insert) *)
   match e with
-  | Var(x) -> k x
+  | Exp(e) -> k e
+  | LetRec(fundef, e) ->
+      LetRec(fundef, insert_let (e, t) k)
   | _ ->
       let x = Id.gentmp t in
-      let e', t' = k x in
-	Let((x, t), e, e'), t'
+	Let((x, t), e, k (Var(x)))
 
 let rec g env e = (* K正規化ルーチン本体 (caml2html: knormal_g) *)
   let _ = D.printf "kNormal.g %s\n" (Syntax.string_of_exp e) in  
+  let binop e1 e2 f =
+    insert_let (g env e1)
+      (fun e1' -> insert_let (g env e2)
+	(fun e2' -> f e1' e2')) in
     match e with
   | Syntax.Unit -> Unit, Type.App(Type.Unit, [])
   | Syntax.Nil(t) -> Nil(t), t
-  | Syntax.Bool(b) -> Bool(b), Type.App(Type.Bool, [])
-  | Syntax.Int(i) -> Int(i), Type.App(Type.Int, [])
-  | Syntax.Not(e) -> 
-      insert_let (g env e)
-	(fun x -> Not(x), Type.App(Type.Bool, []))
-  | Syntax.Neg(e) ->
-      insert_let (g env e)
-	(fun x -> Neg(x), Type.App(Type.Int, []))
-  | Syntax.Add(e1, e2) -> (* 足し算のK正規化 (caml2html: knormal_add) *)
-      insert_let (g env e1)
-	(fun x -> insert_let (g env e2)
-	  (fun y -> Add(x, y), Type.App(Type.Int, [])))
-  | Syntax.Sub(e1, e2) ->
-      insert_let (g env e1)
-	(fun x -> insert_let (g env e2)
-	  (fun y -> Sub(x, y), Type.App(Type.Int, [])))
-  | Syntax.Mul(e1, e2) ->
-      insert_let (g env e1)
-	(fun x -> insert_let (g env e2)
-	  (fun y -> Mul(x, y), Type.App(Type.Int, [])))
-  | Syntax.Div(e1, e2) ->
-      insert_let (g env e1)
-	(fun x -> insert_let (g env e2)
-	  (fun y -> Div(x, y), Type.App(Type.Int, [])))
-  | Syntax.Cons(e1, e2) ->
-      let (e1', t1) = (g env e1) in
-      let (e2', t2) = (g env e2) in
-	insert_let (e1', t1)
-	  (fun x -> insert_let (e2', t2)
-	    (fun y -> Cons(x, y), t2))
-  | Syntax.Eq _ | Syntax.LE _ as cmp ->
-      g env (Syntax.If(cmp, Syntax.Bool(true), Syntax.Bool(false)))
-  | Syntax.If(Syntax.Not(e1), e2, e3) -> g env (Syntax.If(e1, e3, e2)) (* notによる分岐を変換 (caml2html: knormal_not) *)
-  | Syntax.If(Syntax.Eq(e1, e2), e3, e4) ->
-      insert_let (g env e1)
-	(fun x -> insert_let (g env e2)
-	  (fun y ->
-	    let e3', t3 = g env e3 in
-	    let e4', t4 = g env e4 in
-	      IfEq(x, y, e3', e4'), t3))
-  | Syntax.If(Syntax.LE(e1, e2), e3, e4) ->
-      insert_let (g env e1)
-	(fun x -> insert_let (g env e2)
-	  (fun y ->
-	    let e3', t3 = g env e3 in
-	    let e4', t4 = g env e4 in
-	      IfLE(x, y, e3', e4'), t3))
-  | Syntax.If(e1, e2, e3) -> g env (Syntax.If(Syntax.Eq(e1, Syntax.Bool(false)), e3, e2)) (* 比較のない分岐を変換 (caml2html: knormal_if) *)
+  | Syntax.Int(i) -> Exp(Int(i)), Type.App(Type.Int, [])
+  | Syntax.Bool(b) -> Exp(Bool(b)), Type.App(Type.Bool, [])
+  | Syntax.Not(e) -> insert_let (g env e) (fun e -> Exp(Not(e))), Type.App(Type.Bool, [])
+  | Syntax.Neg(e) -> insert_let (g env e) (fun e -> Exp(Neg(e))), Type.App(Type.Int, [])
+  | Syntax.Add(e1, e2) -> binop e1 e2 (fun e1' e2' -> Exp(Add(e1', e2'))), Type.App(Type.Int, []) (* 足し算のK正規化 (caml2html: knormal_add) *)
+  | Syntax.Sub(e1, e2) -> binop e1 e2 (fun e1' e2' -> Exp(Sub(e1', e2'))), Type.App(Type.Int, []) 
+  | Syntax.Mul(e1, e2) -> binop e1 e2 (fun e1' e2' -> Exp(Mul(e1', e2'))), Type.App(Type.Int, []) 
+  | Syntax.Div(e1, e2) -> binop e1 e2 (fun e1' e2' -> Exp(Div(e1', e2'))), Type.App(Type.Int, []) 
+  | Syntax.Cons(e1, e2) -> assert false
+  | Syntax.Var(x) -> Exp(Var(x)), M.find x env
+  | Syntax.Eq(e1, e2) -> binop e1 e2 (fun e1' e2' -> Exp(Eq(e1', e2'))), Type.App(Type.Bool, [])
+  | Syntax.LE(e1, e2) -> binop e1 e2 (fun e1' e2' -> Exp(LE(e1', e2'))), Type.App(Type.Bool, [])
+  | Syntax.If(e1, e2, e3) -> 
+      let e1', t1 = g env e1 in
+      let e2', t2 = g env e2 in
+      let e3', t3 = g env e3 in
+	insert_let (e1', t1) (fun x -> If(x, e2', e3')), t3
   | Syntax.Let((x, t), e1, e2) ->
       let e1', t1 = g env e1 in
       let e2', t2 = g (M.add x t env) e2 in
 	Let((x, t), e1', e2'), t2
-  | Syntax.Var(x) -> 
-      Var(x), M.find x env
   | Syntax.LetRec({ Syntax.name = (x, t); Syntax.args = yts; Syntax.body = e1 }, e2) ->
       let env' = M.add x t env in
       let e2', t2 = g env' e2 in
@@ -115,30 +97,29 @@ let rec g env e = (* K正規化ルーチン本体 (caml2html: knormal_g) *)
 	LetRec({ name = (x, t); args = yts; body = e1' }, e2'), t2
   | Syntax.App(Syntax.Var(f), e2s) when not (M.mem f env) -> (* 外部関数の呼び出し (caml2html: knormal_extfunapp) *)
       (match M.find f !Typing.extenv with
-	| Type.App(Type.Arrow, ts) ->
-	    let t = List.hd (List.rev ts) in
-	    let rec bind xs = function (* "xs" are identifiers for the arguments *)
-	      | [] -> ExtFunApp(f, xs), t
-	      | e2 :: e2s ->
-		  insert_let (g env e2)
-		    (fun x -> bind (xs @ [x]) e2s) in
-	      bind [] e2s (* left-to-right evaluation *)
-	| _ -> assert false)
+	 | Type.App(Type.Arrow, ts) ->
+	     let t = List.hd (List.rev ts) in
+	     let rec bind xs = function (* "xs" are identifiers for the arguments *)
+	       | [] -> Exp(ExtFunApp(f, xs))
+	       | e2 :: e2s ->
+		   insert_let (g env e2)
+		     (fun x -> bind (xs @ [x]) e2s) in
+	       (bind [] e2s), t (* left-to-right evaluation *)
+	 | _ -> assert false)
   | Syntax.App(e1, e2s) ->
       (match g env e1 with
 	| _, Type.App(Type.Arrow, ts) as g_e1 ->
 	    let t = List.hd (List.rev ts) in
-	    insert_let g_e1
-	      (fun f ->
-		let rec bind xs = function (* "xs" are identifiers for the arguments *)
-		  | [] -> App(f, xs), t
-		  | e2 :: e2s ->
-		      insert_let (g env e2)
-			(fun x -> bind (xs @ [x]) e2s) in
-		  bind [] e2s) (* left-to-right evaluation *)
+	      insert_let g_e1
+		(fun f ->
+		  let rec bind xs = function (* "xs" are identifiers for the arguments *)
+		    | [] -> Exp(App(f, xs))
+		    | e2 :: e2s ->
+			insert_let (g env e2)
+			  (fun x -> bind (xs @ [x]) e2s) in
+		    bind [] e2s), t (* left-to-right evaluation *)
 	| _, t -> Printf.eprintf "type is %s\n" (Type.string_of_typ t); assert false)
 	
 let f e = 
   let e' = fst (g M.empty e) in
-  let _ = D.printf "KNormal.f DONE BEGIN\n%s\nKNormal.f DONE END\n" (ocaml_of_expr e') in
     e'

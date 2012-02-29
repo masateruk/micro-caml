@@ -4,5 +4,6 @@ let rec fst x y =
     z in
 let n = 1 in
 let m = fst n n in
-  ()
+  print_int m
+
 
