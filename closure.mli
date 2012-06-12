@@ -10,6 +10,8 @@ type t =
 and e = 
   | Bool of bool
   | Int of int
+  | Record of (Id.t * e) list
+  | Field of e * Id.t
   | Not of e
   | Neg of e
   | Add of e * e
@@ -27,9 +29,14 @@ type fundef = {
   formal_fv : (Id.t * Type.t) list;
   body : t;
 }
-type prog = Prog of fundef list * t
+and def =
+  | TypeDef of Id.t * Type.t
+  | VarDef of (Id.t * Type.t) * t
+  | FunDef of fundef
+type prog = Prog of def list
 
 val string_of_e : e -> string
 val string_of_exp : t -> string
+val string_of_def : def -> string
 val fv : t -> S.t
-val f : KNormal.t -> prog
+val f : KNormal.def list -> prog

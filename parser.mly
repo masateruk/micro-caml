@@ -27,11 +27,16 @@ let addtyp x = (x, Type.Meta(Type.newmetavar ()))
 %token LET
 %token IN
 %token REC
+%token TYPE
 %token SEMICOLON
+%token COLON
 %token LPAREN
 %token RPAREN
+%token LBRACE
+%token RBRACE
 %token LSQUARE_BRANKET
 %token RSQUARE_BRANKET
+%token DOT
 %token EOF
 
 /* 優先順位とassociativityの定義（低い方から高い方へ） (caml2html: parser_prior) */
@@ -48,15 +53,37 @@ let addtyp x = (x, Type.Meta(Type.newmetavar ()))
 %left prec_app
 
 /* 開始記号の定義 */
-%type <Syntax.t> sequence
-%start sequence
+%type <Syntax.def list> impl
+%start impl
 
 %%
+
+impl: 
+| definitions { $1 }
+;
+definitions:
+| /* empty */
+    { [] }
+| definition definitions 
+    { $1 :: $2 }
+;
+definition:
+| LET IDENT EQUAL seq_exp
+    %prec prec_let
+    { VarDef(addtyp $2, $4) }
+| LET LPAREN RPAREN EQUAL seq_exp
+    %prec prec_let
+    { VarDef((Id.gentmp (Type.prefix (Type.App(Type.Unit, []))), (Type.App(Type.Unit, []))), $5) }
+| LET REC fundef
+    %prec prec_let
+    { RecDef($3) }
+| TYPE typedef    
+    { $2 }
 
 simple_exp: /* 括弧をつけなくても関数の引数になれる式 (caml2html: parser_simple) */
 | LPAREN exp RPAREN
     { $2 }
-| LPAREN sequence RPAREN
+| LPAREN seq_exp RPAREN
     { $2 }
 | LPAREN RPAREN
     { Unit }
@@ -66,9 +93,11 @@ simple_exp: /* 括弧をつけなくても関数の引数になれる式 (caml2h
     { Int($1) }
 | IDENT
     { Var($1) }
+| simple_exp DOT IDENT
+    { Field($1, $3) }
 | LSQUARE_BRANKET list RSQUARE_BRANKET
     { List.fold_right (fun x xs -> Cons(x, xs)) $2 (Nil(Type.Meta(Type.newmetavar ()))) }
-
+;
 exp: /* 一般の式 (caml2html: parser_exp) */
 | simple_exp
     { $1 }
@@ -111,29 +140,31 @@ exp: /* 一般の式 (caml2html: parser_exp) */
 	(Printf.sprintf "parse error near characters %d-%d"
 	   (Parsing.symbol_start ())
 	   (Parsing.symbol_end ())) }
-
-sequence: 
+;
+seq_exp: 
 | exp
     { $1 }
-| LET IDENT EQUAL sequence IN sequence
+| LET IDENT EQUAL seq_exp IN seq_exp
     %prec prec_let
-    { Let(addtyp $2, $4, $6) }
-| LET REC fundef IN sequence
+    { LetVar(addtyp $2, $4, $6) }
+| LET REC fundef IN seq_exp
     %prec prec_let
     { LetRec($3, $5) }
-| exp SEMICOLON sequence
-    { Let((Id.gentmp (Type.App(Type.Unit, [])), (Type.App(Type.Unit, []))), $1, $3) }
-    
+| LBRACE fields RBRACE
+    { Record($2) }
+| exp SEMICOLON seq_exp
+    { LetVar((Id.gentmp (Type.prefix (Type.App(Type.Unit, []))), (Type.App(Type.Unit, []))), $1, $3) }
+;    
 fundef:
-| IDENT formal_args EQUAL sequence
+| IDENT formal_args EQUAL seq_exp
     { { name = addtyp $1; args = $2; body = $4 } }
-
+;
 formal_args:
 | IDENT formal_args
     { addtyp $1 :: $2 }
 | IDENT
     { [addtyp $1] }
-
+;
 actual_args:
 | actual_args simple_exp
     %prec prec_app
@@ -141,13 +172,47 @@ actual_args:
 | simple_exp
     %prec prec_app
     { [$1] }
-
+;
+fields:
+| field fields_tail
+    { $1 :: $2 }
+;
+fields_tail:
+| /* empty */
+    { [] }
+| SEMICOLON field fields_tail
+    { $2 :: $3 }
+;
+field:
+| IDENT EQUAL exp
+    { ($1, $3) }
+;
+typedef:
+| IDENT EQUAL IDENT
+    { TypeDef($1, Type.NameTy($3, ref None)) }
+| IDENT EQUAL LBRACE field_decls RBRACE
+    { TypeDef($1, Type.App(Type.Record($1, List.map fst $4), List.map snd $4)) }
+;
+field_decls:
+| field_decl field_decls_tail
+    { $1 :: $2 }
+;
+field_decls_tail:
+| /* empty */
+    { [] }
+| SEMICOLON field_decl field_decls_tail
+    { $2 :: $3 }
+;
+field_decl:
+| IDENT COLON IDENT
+    { ($1, Type.NameTy($3, ref None)) }
+;
 list: 
-| 
+| /* empty */
     { [] }
 | exp tail
     { $1 :: $2 }
-
+;
 tail: 
 | 
     { [] }

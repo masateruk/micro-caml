@@ -6,120 +6,186 @@ exception Unify of Type.t * Type.t
 exception Error of t * Type.t * Type.t
 
 let extenv = ref M.empty
-
-let rec subst env = function
-  | Type.Var(x) when M.mem x env -> M.find x env
+  
+let rec subst env = 
+  let venv, tenv = env in
+  function
+  | Type.Var(x) when M.mem x venv -> M.find x venv
   | Type.Var(x) -> Type.Var(x)
-  | Type.App(Type.TyFun(xs, t), ys) -> subst env (subst (M.add_list2 xs ys env) t)
+  | Type.Field(tid, t) -> Type.Field(subst env tid, subst env t)
+  | Type.App(Type.TyFun(xs, t), ys) -> subst env (subst ((M.add_list2 xs ys venv), tenv) t)
   | Type.App(x, ys) -> Type.App(x, (List.map (subst env) ys))
   | Type.Poly(xs, t) -> 
       let ys = List.map (fun _ -> Type.newtyvar ()) xs in
-      let t' = subst (M.add_list2 xs (List.map (fun y -> Type.Var(y)) ys) env) t in
-	Type.Poly(ys, subst env t')
+      let t' = subst ((M.add_list2 xs (List.map (fun y -> Type.Var(y)) ys) venv), tenv) t in
+      Type.Poly(ys, subst env t')
   | Type.Meta{ contents = Some(t) } -> subst env t
   | Type.Meta{ contents = None } as t -> t
-	  
-let rec occur x = function (* occur check (caml2html: typing_occur) *)
-  | Type.App(Type.TyFun(_, u), ts) -> occur x u || List.exists (occur x) ts
-  | Type.App(_, ts) -> List.exists (occur x) ts
-  | Type.Poly(_, t) -> occur x t
-  | Type.Meta{ contents = Some(t) } -> occur x t
+  | Type.NameTy(x, _) -> subst env (M.find x tenv)
+          
+let rec occur tenv x = (* occur check (caml2html: typing_occur) *)
+  function 
+  | Type.App(Type.TyFun(_, u), ts) -> occur tenv x u || List.exists (occur tenv x) ts
+  | Type.App(_, ts) -> List.exists (occur tenv x) ts
+  | Type.Poly(_, t) -> occur tenv x t
+  | Type.Meta{ contents = Some(t) } -> occur tenv x t
   | Type.Meta(y) -> x == y
+  | Type.NameTy(y, _) -> occur tenv x (M.find y tenv)
   | _ -> false
-
-let rec unify t1 t2 = (* 型が合うように、メタ型変数への代入をする. 成功したら () を返す. (caml2html: typing_unify) *)
-  let _ = D.printf "  Typing.unify %s %s\n" (Type.string_of_typ t1) (Type.string_of_typ t2) in
+      
+let rec unify tenv t1 t2 = (* 型が合うように、メタ型変数への代入をする. 成功したら () を返す. (caml2html: typing_unify) *)
+  let _ = D.printf "  Typing.unify %s %s\n" (Type.string_of t1) (Type.string_of t2) in
   match t1, t2 with
   | Type.App(Type.Unit, xs), Type.App(Type.Unit, ys) 
   | Type.App(Type.Bool, xs), Type.App(Type.Bool, ys) 
   | Type.App(Type.Int, xs), Type.App(Type.Int, ys) 
-  | Type.App(Type.Arrow, xs), Type.App(Type.Arrow, ys) -> List.iter2 unify xs ys
-  | Type.App(Type.TyFun(xs, u), ys), t2 -> unify (subst (M.add_list2 xs ys M.empty) u) t2
-  | t1, Type.App(Type.TyFun(xs, u), ys) -> unify t1 (subst (M.add_list2 xs ys M.empty) u)
-  | Type.Poly(xs, u1), Type.Poly(ys, u2) -> unify u1 (subst (M.add_list2 ys (List.map (fun x -> Type.Var(x)) xs) M.empty) u2)
+  | Type.App(Type.Arrow, xs), Type.App(Type.Arrow, ys) -> List.iter2 (unify tenv) xs ys
+  | Type.App(Type.Record(x, fs), xs), Type.App(Type.Record(y, fs'), ys) when fs = fs' -> List.iter2 (unify tenv) xs ys
+  | Type.App(Type.TyFun(xs, u), ys), t2 -> unify tenv (subst ((M.add_list2 xs ys M.empty), M.empty) u) t2
+  | t1, Type.App(Type.TyFun(xs, u), ys) -> unify tenv t1 (subst ((M.add_list2 xs ys M.empty), M.empty) u)
+  | Type.Poly([], u1), t2 -> unify tenv u1 t2
+  | t1, Type.Poly([], u2) -> unify tenv t1 u2
+  | Type.Poly(xs, u1), Type.Poly(ys, u2) -> unify tenv u1 (subst ((M.add_list2 ys (List.map (fun x -> Type.Var(x)) xs) M.empty), M.empty) u2)
   | Type.Var(x), Type.Var(y) when x = y -> ()
-  | Type.Meta{ contents = Some(t1') }, t2 -> unify t1' t2
-  | Type.Meta(x), Type.Meta{ contents = Some(t2') } -> unify t1 t2'
+  | Type.Field(_, t1'), t2 -> unify tenv t1' t2
+  | t1, Type.Field(_, t2') -> unify tenv t1 t2'
+  | Type.Meta{ contents = Some(t1') }, t2 -> unify tenv t1' t2
+  | Type.Meta(x), Type.Meta{ contents = Some(t2') } -> unify tenv t1 t2'
   | Type.Meta(x), Type.Meta(y) when x == y -> ()
   | Type.Meta(x), t2 ->
-      if occur x t2 then 
-	raise (Unify(t1, t2))
-      else 
-	x := Some(t2)
-  | t1, Type.Meta(y) -> unify t2 t1
+      if occur tenv x t2 then raise (Unify(t1, t2))
+      else x := Some(t2)
+  | t1, Type.Meta(y) -> unify tenv t2 t1
+  | Type.NameTy(u1, t), t2 -> 
+      let u1' = M.find u1 tenv in 
+      t := Some(u1'); 
+      unify tenv u1' t2
+  | t1, Type.NameTy(u2, t) -> 
+      let u2' = M.find u2 tenv in 
+      t := Some(u2'); 
+      unify tenv t1 u2'
   | _, _ -> 
-	raise (Unify(t1, t2))
-
+      raise (Unify(t1, t2))
+        
 let test_unify =
-  assert ((unify (Type.App(Type.Int, [])) (Type.App(Type.Int, []))) = ())
-
-let rec expand = function
-  | Type.App(Type.TyFun(xs, u), ys) -> expand (subst (M.add_list2 xs ys M.empty) u)
-  | Type.Meta{ contents = Some(t) } -> expand t
+  assert ((unify M.empty (Type.App(Type.Int, [])) (Type.App(Type.Int, []))) = ())
+    
+let rec equal tenv t1 t2 = 
+  match t1, t2 with
+  | Type.App(Type.Unit, xs), Type.App(Type.Unit, ys) 
+  | Type.App(Type.Bool, xs), Type.App(Type.Bool, ys) 
+  | Type.App(Type.Int, xs), Type.App(Type.Int, ys) 
+  | Type.App(Type.Arrow, xs), Type.App(Type.Arrow, ys) -> List.for_all2 (equal tenv) xs ys
+  | Type.App(Type.TyFun(xs, u), ys), t2 -> equal tenv (subst ((M.add_list2 xs ys M.empty), M.empty) u) t2
+  | Type.Poly([], u1), t2 -> equal tenv u1 t2
+  | t1, Type.Poly([], u2) -> equal tenv t1 u2
+  | Type.Poly(
+    xs, u1), Type.Poly(ys, u2) -> equal tenv u1 (subst ((M.add_list2 ys (List.map (fun x -> Type.Var(x)) xs) M.empty), M.empty) u2)
+  | Type.Var(x), Type.Var(y) when x = y -> true
+  | Type.Field(_, x), Type.Field(_, y) -> equal tenv x y
+  | Type.Meta{ contents = Some(t1') }, t2 -> equal tenv t1' t2
+  | Type.Meta(x), Type.Meta{ contents = Some(t2') } -> equal tenv t1 t2'
+  | Type.Meta(x), Type.Meta(y) when x == y -> true
+  | Type.Meta(x), t2 ->
+      if occur tenv x t2 then false
+      else true
+  | t1, Type.Meta(y) -> equal tenv t2 t1
+  | Type.NameTy(u1, t), t2 -> 
+      let u1' = M.find u1 tenv in 
+      equal tenv u1' t2
+  | t1, Type.NameTy(u2, t) -> 
+      let u2' = M.find u2 tenv in 
+      equal tenv t1 u2'
+  | _, _ -> 
+      false
+        
+let rec expand tenv = 
+  function
+  | Type.App(Type.TyFun(xs, u), ys) -> expand tenv (subst ((M.add_list2 xs ys M.empty), tenv) u)
+  | Type.Meta{ contents = Some(t) } -> expand tenv t
+  | Type.NameTy(x, _) -> expand tenv (M.find x tenv)
   | t -> t
-
+      
 let rec generalize env t = 
-  let _ = D.printf "Typing.generalize %s\n" (Type.string_of_typ t) in
-  let rec exists v = function
+  let _ = D.printf "Typing.generalize %s\n" (Type.string_of t) in
+  let venv, tenv = env in    
+  let rec exists v = 
+    function
     | Type.App(Type.TyFun(_, u), ts) -> exists v u || List.exists (exists v) ts
     | Type.App(_, ts) -> List.exists (exists v) ts
     | Type.Poly(_, t) -> exists v t
     | Type.Meta{ contents = Some(t') } -> exists v t'
     | Type.Meta(x) when v == x -> true
+    | Type.NameTy(x, _) -> exists v (M.find x tenv)
     | _ -> false in
-  let rec metavars vs = function
+  let rec metavars vs = 
+    function
     | Type.App(Type.TyFun(_, u), ts) -> List.fold_left metavars (metavars vs u) ts
     | Type.App(_, ts) -> List.fold_left metavars vs ts
     | Type.Poly(_, t) -> metavars vs t
     | Type.Meta{ contents = Some(t') } -> metavars vs t'
-    | Type.Meta(x) when M.exists (fun _ t' -> exists x t') env -> vs
+    | Type.Meta(x) when M.exists (fun _ t' -> exists x t') venv -> vs
     | Type.Meta(x) -> if (List.memq x vs) then vs else x :: vs
+    | Type.NameTy(x, _) -> metavars vs (M.find x tenv)
     | _ -> vs in
   let ms = metavars [] t in
   let tyvars = List.map (fun m -> match !m with None -> let var = Type.newtyvar () in m := Some(Type.Var(var)); var | _ -> assert false) ms in
-    Type.Poly(tyvars, t)
+  Type.Poly(tyvars, t)
       
-let rec instantiate = function
+let rec instantiate tenv = 
+  function
   | Type.Poly(xs, t) -> 
-      subst (M.add_list (List.map (fun x -> (x, Type.Meta(Type.newmetavar ()))) xs) M.empty) t
+      subst ((M.add_list (List.map (fun x -> (x, Type.Meta(Type.newmetavar ()))) xs) M.empty), tenv) t
+  | Type.NameTy(x, _) -> instantiate tenv (M.find x tenv)
   | t -> t 
-  
+      
 (* for pretty printing (and type normalization) *)
-let rec deref_typ = function (* 型変数を中身でおきかえる関数 (caml2html: typing_deref) *)
-  | Type.App(Type.TyFun(xs, t), ys) -> Type.App(Type.TyFun(xs, deref_typ t), List.map deref_typ ys)
-  | Type.App(x, ys) -> Type.App(x, List.map deref_typ ys)
-  | Type.Poly(xs, t) -> Type.Poly(xs, deref_typ t)
+let rec deref_typ tenv = (* 型変数を中身でおきかえる関数 (caml2html: typing_deref) *)
+  function
+  | Type.App(Type.TyFun(xs, t), ys) -> Type.App(Type.TyFun(xs, deref_typ tenv t), List.map (deref_typ tenv) ys)
+  | Type.App(x, ys) -> Type.App(x, List.map (deref_typ tenv) ys)
+  | Type.Poly(xs, t) -> Type.Poly(xs, deref_typ tenv t)
   | Type.Meta({ contents = None } as r) ->
       Printf.eprintf "uninstantiated type variable detected; assuming int@.";
       r := Some(Type.App(Type.Int, []));
       Type.App(Type.Int, [])
   | Type.Meta({ contents = Some(t) } as r) ->
-      let t' = deref_typ t in
+      let t' = deref_typ tenv t in
       r := Some(t');
       t'
+  | Type.NameTy("bool", _) -> Type.App(Type.Bool, [])
+  | Type.NameTy("int", _) -> Type.App(Type.Int, [])
+  | Type.NameTy(x, ({ contents = None } as r)) -> 
+      let t' = M.find x tenv in
+      r := Some(t');
+      Type.NameTy(x, r)
+  | Type.Field _ -> assert false
   | t -> t
-let rec deref_id_typ (x, t) = (x, deref_typ t)
-let rec deref_term = function
-  | Not(e) -> Not(deref_term e)
-  | Neg(e) -> Neg(deref_term e)
-  | Add(e1, e2) -> Add(deref_term e1, deref_term e2)
-  | Sub(e1, e2) -> Sub(deref_term e1, deref_term e2)
-  | Eq(e1, e2) -> Eq(deref_term e1, deref_term e2)
-  | LE(e1, e2) -> LE(deref_term e1, deref_term e2)
-  | Mul(e1, e2) -> Mul(deref_term e1, deref_term e2)
-  | Div(e1, e2) -> Div(deref_term e1, deref_term e2)
-  | Cons(e1, e2) -> Cons(deref_term e1, deref_term e2)
-  | If(e1, e2, e3) -> If(deref_term e1, deref_term e2, deref_term e3)
-  | Let(xt, e1, e2) -> Let(deref_id_typ xt, deref_term e1, deref_term e2)
+      
+let rec deref_id_typ tenv (x, t) = (x, deref_typ tenv t)
+let rec deref_term tenv = 
+  function
+  | Not(e) -> Not(deref_term tenv e)
+  | Neg(e) -> Neg(deref_term tenv e)
+  | Add(e1, e2) -> Add(deref_term tenv e1, deref_term tenv e2)
+  | Sub(e1, e2) -> Sub(deref_term tenv e1, deref_term tenv e2)
+  | Eq(e1, e2) -> Eq(deref_term tenv e1, deref_term tenv e2)
+  | LE(e1, e2) -> LE(deref_term tenv e1, deref_term tenv e2)
+  | Mul(e1, e2) -> Mul(deref_term tenv e1, deref_term tenv e2)
+  | Div(e1, e2) -> Div(deref_term tenv e1, deref_term tenv e2)
+  | Cons(e1, e2) -> Cons(deref_term tenv e1, deref_term tenv e2)
+  | If(e1, e2, e3) -> If(deref_term tenv e1, deref_term tenv e2, deref_term tenv e3)
+  | LetVar(xt, e1, e2) -> LetVar(deref_id_typ tenv xt, deref_term tenv e1, deref_term tenv e2)
   | LetRec({ name = xt; args = yts; body = e1 }, e2) ->
-      LetRec({ name = deref_id_typ xt;
-	       args = List.map deref_id_typ yts;
-	       body = deref_term e1 },
-	     deref_term e2)
-  | App(e, es) -> App(deref_term e, List.map deref_term es)
+      LetRec({ name = deref_id_typ tenv xt;
+               args = List.map (deref_id_typ tenv) yts;
+               body = deref_term tenv e1 },
+             deref_term tenv e2)
+  | App(e, es) -> App(deref_term tenv e, List.map (deref_term tenv) es)
   | e -> e
-
+      
 let rec g env e = (* 型推論ルーチン (caml2html: typing_g) *)
+  let venv, tenv = env in
   let _ = D.printf "Typing.g %s\n" (string_of_exp e) in
   try
     match e with
@@ -127,69 +193,103 @@ let rec g env e = (* 型推論ルーチン (caml2html: typing_g) *)
     | Nil _ -> assert false (* not implemented *)
     | Bool(_) -> Type.App(Type.Bool, [])
     | Int(_) -> Type.App(Type.Int, [])
+    | Record(xes) -> 
+        let xts = List.map (fun (x, e) -> x, g env e) xes in 
+        List.iter (fun (x, t) -> unify tenv (M.find x tenv) t) xts;
+        begin
+          match (M.find (fst (List.hd xts)) tenv) with 
+          | Type.Field(t, _) -> t 
+          | t -> Printf.eprintf "invalid type : t = %s\n" (Type.string_of t); assert false
+        end
+    | Field(e, x) ->
+        let t = M.find x tenv in
+        begin
+          match t with
+          | Type.Field(tid, ys) -> 
+              let tid' = g env e in
+              unify tenv tid tid';
+              t
+          | t -> Printf.eprintf "invalid type : t = %s\n" (Type.string_of t); assert false
+        end
     | Not(e) ->
-	unify (Type.App(Type.Bool, [])) (g env e);
-	Type.App(Type.Bool, [])
+        unify tenv (Type.App(Type.Bool, [])) (g env e);
+        Type.App(Type.Bool, [])
     | Neg(e) ->
-	unify (Type.App(Type.Int, [])) (g env e);
-	Type.App(Type.Int, [])
+        unify tenv (Type.App(Type.Int, [])) (g env e);
+        Type.App(Type.Int, [])
     | Add(e1, e2) | Sub(e1, e2) | Mul(e1, e2) | Div(e1, e2) ->
-	unify (Type.App(Type.Int, [])) (g env e1);
-	unify (Type.App(Type.Int, [])) (g env e2);
-	Type.App(Type.Int, [])
+        unify tenv (Type.App(Type.Int, [])) (g env e1);
+        unify tenv (Type.App(Type.Int, [])) (g env e2);
+        Type.App(Type.Int, [])
     | Cons _ -> assert false (* not implemented *)
-(*	  
+(*        
     | Cons(e1, e2) ->
-	let t1 = g env e1 in
-	let t2 = g env e2 in
-	  (match t2 with
-	    | Type.List(t2') -> 
-		let _ = unify t1 t2' in
-		  Type.List(t2')
-	    | _ -> raise (Unify(t1, t2)))
-*)	  
+        let t1 = g env e1 in
+        let t2 = g env e2 in
+        (match t2 with
+        | Type.List(t2') -> 
+            let _ = unify t1 t2' in
+            Type.List(t2')
+        | _ -> raise (Unify(t1, t2)))
+*)        
     | Eq(e1, e2) | LE(e1, e2) ->
-	unify (g env e1) (g env e2);
-	Type.App(Type.Bool, [])
+        unify tenv (g env e1) (g env e2);
+        Type.App(Type.Bool, [])
     | If(e1, e2, e3) ->
-	unify (g env e1) (Type.App(Type.Bool, []));
-	let t2 = g env e2 in
-	let t3 = g env e3 in
-	  unify t2 t3;
-	  t2
-    | Let((x, t), e1, e2) -> (* letの型推論 (caml2html: typing_let) *)
-	let t1 = g env e1 in
-	let t1' = generalize env t1 in (* 副作用は未サポートなので、Tiger本のp.335にある代入の判定はなし *)
-	  unify t t1';
-	  g (M.add x t1' env) e2
-    | Var(x) when M.mem x env -> instantiate (M.find x env) (* 変数の型推論 (caml2html: typing_var) *)
-    | Var(x) when M.mem x !extenv -> instantiate (M.find x !extenv)
+        unify tenv (g env e1) (Type.App(Type.Bool, []));
+        let t2 = g env e2 in
+        let t3 = g env e3 in
+        unify tenv t2 t3;
+        t2
+    | LetVar((x, t), e1, e2) -> (* letの型推論 (caml2html: typing_let) *)
+        let t1 = g env e1 in
+        let t1' = generalize env t1 in (* 副作用は未サポートなので、Tiger本のp.335にある代入の判定はなし *)
+        unify tenv t t1';
+        g ((M.add x t1' venv), tenv) e2
+    | Var(x) when M.mem x venv -> instantiate tenv (M.find x venv) (* 変数の型推論 (caml2html: typing_var) *)
+    | Var(x) when M.mem x !extenv -> instantiate tenv (M.find x !extenv)
     | Var(x) -> (* 外部変数の型推論 (caml2html: typing_extvar) *)
-	Format.eprintf "free variable %s assumed as external@." x;
-	let t = Type.Meta(Type.newmetavar ()) in
-	  extenv := M.add x t !extenv;
-	  instantiate t
+        Format.eprintf "free variable %s assumed as external@." x;
+        let t = Type.Meta(Type.newmetavar ()) in
+        extenv := M.add x t !extenv;
+        instantiate tenv t
     | LetRec({ name = (x, t); args = yts; body = e1 }, e2) -> (* let recの型推論 (caml2html: typing_letrec) *)
-	let t2 = Type.Meta(Type.newmetavar()) in
-	let t' = Type.App(Type.Arrow, ((List.map snd yts) @ [t2])) in
-	let t1 = g (M.add_list yts (M.add x t' env)) e1 in
-	  unify t t';
-	  unify t2 t1;
-	  let t'' = generalize env t' in
-	    g (M.add x t'' env) e2
+        let t2 = Type.Meta(Type.newmetavar()) in
+        let t' = Type.App(Type.Arrow, ((List.map snd yts) @ [t2])) in
+        let t1 = g ((M.add_list yts (M.add x t' venv)), tenv) e1 in
+        unify tenv t t';
+        unify tenv t2 t1;
+        let t'' = generalize env t' in
+        g ((M.add x t'' venv), tenv) e2
     | App(e, es) -> (* 関数適用の型推論 (caml2html: typing_app) *)
-	let e' = g env e in
-	let es' = List.map (g env) es in
-	let result = Type.Meta(Type.newmetavar ()) in
-	  unify e' (Type.App(Type.Arrow, es' @ [result]));
-	    result
+        let e' = g env e in
+        let es' = List.map (g env) es in
+        let result = Type.Meta(Type.newmetavar ()) in
+        unify tenv e' (Type.App(Type.Arrow, es' @ [result]));
+        result
   with Unify(t1, t2) -> 
-    let _ = D.printf "Typing.g error %s : %s and %s\n" (string_of_exp e) (Type.string_of_typ t1) (Type.string_of_typ t2) in
-      raise (Error(deref_term e, deref_typ t1, deref_typ t2))
+    let _ = D.printf "Typing.g error %s : %s and %s\n" (string_of_exp e) (Type.string_of t1) (Type.string_of t2) in
+    raise (Error(deref_term tenv e, deref_typ tenv t1, deref_typ tenv t2))
 
-let f e = 
-  (try unify (Type.App(Type.Unit, [])) (g M.empty e)
-    with Unify _ -> failwith "top level does not have type unit");
-  extenv := M.map deref_typ !extenv;
-  deref_term e
 
+let f' env (e, t) = 
+  let venv, tenv = env in
+  (try unify tenv t (g env e)
+   with Unify _ -> failwith "type error.");
+  extenv := M.map (deref_typ tenv) !extenv;
+  deref_term tenv e
+    
+let f = 
+  fold (fun env -> 
+    let venv, tenv = env in
+      function    
+      | TypeDef(x, t) -> 
+          TypeDef(x, deref_typ (M.add x t tenv) t)
+      | VarDef((x, t), e) -> 
+          let e' = f' env (e, t) in
+            VarDef((x, deref_typ tenv t), e')
+      | RecDef({ name = (x, t); args = yts; body = e }) -> 
+          let venv, tenv = env in
+          let e' = f' ((M.add_list yts (M.add x t venv)), tenv) (e, t) in
+            RecDef({ name = (x, deref_typ tenv t); args = List.map (fun (y, t) -> (y, deref_typ tenv t)) yts; body = e' }))
+    

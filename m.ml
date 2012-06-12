@@ -10,5 +10,4 @@ include M
 
 let add_list xys env = List.fold_left (fun env (x, y) -> add x y env) env xys
 let add_list2 xs ys env = List.fold_left2 (fun env x y -> add x y env) env xs ys
-
-
+let dump f = iter (fun x y -> D.printf "%s -> %s\n" x (f y)) 

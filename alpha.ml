@@ -10,6 +10,8 @@ let genid x env = if (M.mem x env) then Id.genid x else x
 let rec h env = function
   | Bool(b) -> Bool(b)
   | Int(i) -> Int(i)
+  | Record(xs) -> Record(List.map (fun (x, e) -> x, (h env e)) xs)
+  | Field(e, x) -> Field(h env e, x)
   | Not(e) -> Not(h env e)
   | Var(x) -> Var(find x env)
   | Neg(e) -> Neg(h env e)
@@ -40,4 +42,12 @@ let rec g env = function (* α変換ルーチン本体 (caml2html: alpha_g) *)
 	       body = g env' e1 },
 	     g env e2)
 
-let f = g M.empty
+let f' env e = g (fst env) e
+
+let f = fold
+  (fun env -> function
+    | TypeDef(x, t) -> TypeDef(x, t)
+    | VarDef(xt, e) -> VarDef(xt, f' env e)
+    | RecDef({ name = (x, t); args = yts; body = e1 }) -> RecDef({ name = (x, t); args = yts; body = f' env e1 }))
+  (fun x _ venv ->  add x (genid x venv) venv)
+  M.add

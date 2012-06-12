@@ -63,24 +63,26 @@ let mark_id defs x =
   List.iter (function FunDef({ name = Id.L(x'); _ }, b) when x' = x -> b := true | _ -> ()) defs
 
 let mark_ty defs t =
-  List.iter (fun def -> match t, def with NameTy(x, t), TypeDef((x', t'), b) when x' = x && is_ty_equal t t' -> b := true | _ -> ()) defs
+  List.iter (fun def -> match t, def with CType.NameTy(x, { contents = Some(t)}), TypeDef((x', t'), b) when x' = x && CType.equal t t' -> b := true | _ -> ()) defs
 
-let rec mark_exp defs = function 
-    | Nop | BoolExp _ | IntExp _ -> ()
-    | Nil(t) -> mark_ty defs t
-    | Not(e) | Neg(e) -> mark_exp defs e
-    | Add(e1, e2) | Sub(e1, e2) | Mul(e1, e2) | Div(e1, e2) | Eq(e1, e2) | LE(e1, e2) -> mark_exp defs e1; mark_exp defs e2
-    | Cons(x, y) -> mark_id defs x; mark_id defs y
-    | Var(x) -> mark_id defs x
-    | Cond(e, e1, e2) -> mark_exp defs e; mark_exp defs e1; mark_exp defs e2
-    | CallDir(e, es) -> mark_exp defs e; List.iter (mark_exp defs) es
-    | Let _ -> assert false
-    | MakeClosure(Id.L(x), y, zts) -> mark_id defs x; mark_id defs y; List.iter (fun (z, t) -> mark_id defs z; mark_ty defs t) zts
-    | Field(x, y) -> mark_id defs x; mark_id defs y
-    | Sizeof(t) -> mark_ty defs t
-    | Ref(e) | Deref(e) -> mark_exp defs e
-    | Cast(t, e) -> mark_ty defs t; mark_exp defs e
-    | Comma -> assert false
+let rec mark_exp defs = 
+  function 
+  | Nop | Bool _ | Int _ -> ()
+  | Nil(t) -> mark_ty defs t
+  | Struct(_, xes) -> List.iter (fun (x, e) -> mark_exp defs e) xes
+  | Field(e, y) -> mark_exp defs e; mark_id defs y
+  | Not(e) | Neg(e) -> mark_exp defs e
+  | Add(e1, e2) | Sub(e1, e2) | Mul(e1, e2) | Div(e1, e2) | Eq(e1, e2) | LE(e1, e2) -> mark_exp defs e1; mark_exp defs e2
+  | Cons(x, y) -> mark_id defs x; mark_id defs y
+  | Var(x) -> mark_id defs x
+  | Cond(e, e1, e2) -> mark_exp defs e; mark_exp defs e1; mark_exp defs e2
+  | CallDir(e, es) -> mark_exp defs e; List.iter (mark_exp defs) es
+  | Let _ -> assert false
+  | MakeClosure(Id.L(x), y, zts) -> mark_id defs x; mark_id defs y; List.iter (fun (z, t) -> mark_id defs z; mark_ty defs t) zts
+  | Sizeof(t) -> mark_ty defs t
+  | Ref(e) | Deref(e) -> mark_exp defs e
+  | Cast(t, e) -> mark_ty defs t; mark_exp defs e
+  | Comma -> assert false
 
 let rec mark_dec defs = function
     | VarDec((x, t), None) -> mark_id defs x; mark_ty defs t

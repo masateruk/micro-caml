@@ -1,18 +1,23 @@
 type t = 
-    | Var of tyvar 
-    | App of tycon * t list 
-    | Poly of tyvar list * t
-    | Meta of t option ref
+  | Var of tyvar 
+  | Field of t * t
+  | App of tycon * t list 
+  | Poly of tyvar list * t
+  | Meta of t option ref
+  | NameTy of Id.t * t option ref
 and tycon = 
-    | Unit 
-    | Bool 
-    | Int 
-    | Arrow 
-    | TyFun of tyvar list * t
-and tyvar = string
-and metavar = string
+  | Unit 
+  | Bool 
+  | Int 
+  | Arrow 
+  | Record of Id.t * Id.t list
+  | TyFun of tyvar list * t
+and tyvar = Id.t
+and metavar = Id.t
 val counter : int ref
-val newtyvar : unit -> string
+val newtyvar : unit -> Id.t
 val newmetavar : unit -> t option ref
-val string_of_typ : t -> string
-val string_of_tycon : tycon -> string
+val string_of : t -> Id.t
+val string_of_tycon : tycon -> Id.t
+val prefix : t -> Id.t
+val ocaml_of : t -> Id.t

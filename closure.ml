@@ -10,6 +10,8 @@ type t = (* クロージャ変換後の式 (caml2html: closure_t) *)
 and e = 
   | Bool of bool
   | Int of int
+  | Record of (Id.t * e) list
+  | Field of e * Id.t
   | Not of e
   | Neg of e
   | Add of e * e
@@ -25,11 +27,18 @@ type fundef = { name : Id.l * Type.t;
 		args : (Id.t * Type.t) list;
 		formal_fv : (Id.t * Type.t) list;
 		body : t }
-type prog = Prog of fundef list * t
+and def =
+  | TypeDef of Id.t * Type.t
+  | VarDef of (Id.t * Type.t) * t
+  | FunDef of fundef
+type prog = Prog of def list
 
-let rec string_of_e = function
+let rec string_of_e = 
+  function
   | Bool(b) -> string_of_bool b
   | Int(n) -> string_of_int n
+  | Record(xes) -> "{" ^ (String.concat "; " (List.map (fun (x, e) -> x ^ " = " ^ (string_of_e e)) xes)) ^ "}"
+  | Field(e, x) -> (string_of_e e) ^ "." ^ x
   | Not(e) -> "not " ^ (string_of_e e)
   | Neg(e) -> "! " ^ (string_of_e e)
   | Add(e1, e2) -> (string_of_e e1) ^ " + " ^ (string_of_e e2)
@@ -41,41 +50,56 @@ let rec string_of_e = function
   | Var(x) -> x
   | App(e, args) -> "apply_closure " ^ (string_of_e e) ^ " " ^ (String.concat " " (List.map string_of_e args))
   | AppDir(Id.L(x), args) -> x ^ " " ^ (String.concat " " (List.map string_of_e args))
-    
-let rec string_of_exp = function
+      
+let rec string_of_exp = 
+  function
   | Unit -> "()"
   | Nil _ -> "[]"
   | Exp(e) -> string_of_e e
   | Cons(s1, s2) -> s1 ^ " :: " ^ s2
   | If(e, e1, e2) -> "if " ^ (string_of_e e) ^ "\n\tthen " ^ (string_of_exp e1) ^ "\n\telse " ^ (string_of_exp e2)
-  | Let((s1, t), e1, e2) -> "let " ^ s1 ^ " : " ^ (Id.ocaml_of_typ t) ^ " = " ^ (string_of_exp e1) ^ " in\n" ^ (string_of_exp e2)
+  | Let((s1, t), e1, e2) -> "let " ^ s1 ^ " : " ^ (Type.ocaml_of t) ^ " = " ^ (string_of_exp e1) ^ " in\n" ^ (string_of_exp e2)
   | MakeCls((x, t), { entry = Id.L(l); actual_fv = ys }, e) -> "let " ^ x ^ " : closure = make_closure " ^ l ^ " " ^ (String.concat ", " ys) ^ " in " ^ (string_of_exp e)
-
+      
 let string_of_fundef { name = (Id.L(x), t); args = yts; formal_fv = zts; body = e } =
   "\nlet rec " ^ x ^ " " ^ (String.concat " " (List.map (fun (y, t) -> y) (yts @ zts))) ^ (* " : " ^ (Id.string_of_typ t) ^ *) " = " ^ (string_of_exp e) 
-
-let rec fv_of_e = function
+    
+let rec string_of_def = 
+  function
+  | TypeDef(x, t) -> "TypeDef(" ^ x ^ ", " ^ (Type.string_of t) ^ ")"
+  | VarDef((x, t), e) -> "VarDef((" ^ x ^ ", " ^ (Type.string_of t) ^ "), " ^ (string_of_exp e) ^ ")"
+  | FunDef(fundef) -> "FunDef(" ^ (string_of_fundef fundef) ^ ")"
+      
+      
+let rec fv_of_e = 
+  function
   | Bool(_) | Int(_) -> S.empty
+  | Record(xes) -> List.fold_left (fun s (_, e) -> S.union s (fv_of_e e)) S.empty xes
+  | Field(e, _) -> fv_of_e e
   | Not(e) | Neg(e) -> fv_of_e e
   | Add(e1, e2) | Sub(e1, e2) | Mul(e1, e2) | Div(e1, e2) | Eq(e1, e2) | LE(e1, e2) -> S.union (fv_of_e e1) (fv_of_e e2)
   | Var(x) -> S.singleton x
   | App(e, es) -> List.fold_left (fun s e -> S.union s (fv_of_e e)) S.empty (e :: es)
   | AppDir(_, es) -> List.fold_left (fun s e -> S.union s (fv_of_e e)) S.empty es
-    
-let rec fv = function
+      
+let rec fv = 
+  function
   | Unit | Nil(_) -> S.empty
   | Exp(e) -> fv_of_e e
   | Cons(x, y) -> S.of_list [x; y]
   | If(e, e1, e2) -> S.union (fv_of_e e) (S.union (fv e1) (fv e2))
   | Let((x, t), e1, e2) -> S.union (fv e1) (S.remove x (fv e2))
   | MakeCls((x, t), { entry = l; actual_fv = ys }, e) -> S.remove x (S.union (S.of_list ys) (fv e))
-
-let toplevel : fundef list ref = ref []
-
+      
+let toplevel : def list ref = ref []
+  
 let rec h env known e = 
+  let () = D.printf "Closure.h %s\n" (KNormal.ocaml_of_e e) in
   match e with
   | KNormal.Bool(b) -> Bool(b)
   | KNormal.Int(i) -> Int(i)
+  | KNormal.Record(xes) -> Record(List.map (fun (x, e) -> x, h env known e) xes)
+  | KNormal.Field(e, x) -> Field(h env known e, x)
   | KNormal.Not(e) -> Not(h env known e)
   | KNormal.Var(x) -> Var(x)
   | KNormal.Neg(e) -> Neg(h env known e)
@@ -94,7 +118,7 @@ let rec h env known e =
       AppDir(Id.L(x), List.map (h env known) ys)
   
 let rec g env known e = (* クロージャ変換ルーチン本体 (caml2html: closure_g) *)
-  let () = D.printf "Closure.g %s\n" (KNormal.ocaml_of_expr e) in
+  let () = D.printf "Closure.g %s\n" (KNormal.ocaml_of_t e) in
   match e with 
   | KNormal.Unit -> Unit
   | KNormal.Nil(t) -> Nil(t)
@@ -114,7 +138,14 @@ let rec g env known e = (* クロージャ変換ルーチン本体 (caml2html: c
       (* 本当に自由変数がなかったか、変換結果e1'を確認する *)
       (* 注意: e1'にx自身が変数として出現する場合はclosureが必要!
          (thanks to nuevo-namasute and azounoman; test/cls-bug2.ml参照) *)
-      let zs = S.diff (fv e1') (S.of_list ((List.map fst yts) @ (List.map (fun { name = (Id.L(x), _); _ } -> x) !toplevel))) in
+      let zs = S.diff (fv e1') 
+	(S.of_list ((List.map fst yts) @ 
+		       (List.fold_left 
+			   (fun zs def -> 
+			     match def with 
+			       | TypeDef _ -> zs
+			       | VarDef((x, _), _) | FunDef{ name = (Id.L(x), _); _ } -> x :: zs)
+			   [] !toplevel))) in
       let known', e1' =
 	if S.is_empty zs then known', e1' else
 	(* 駄目だったら状態(toplevelの値)を戻して、クロージャ変換をやり直す *)
@@ -123,9 +154,16 @@ let rec g env known e = (* クロージャ変換ルーチン本体 (caml2html: c
 	 toplevel := toplevel_backup;
 	 let e1' = g (M.add_list yts env') known e1 in
 	 known, e1') in
-      let zs = S.elements (S.diff (fv e1') (S.add x (S.of_list ((List.map fst yts) @ (List.map (fun { name = (Id.L(x), _); _ } -> x) !toplevel))))) in (* 自由変数のリスト *)
+      let zs = S.elements (S.diff (fv e1') 
+			      (S.add x (S.of_list ((List.map fst yts) @ 
+						      (List.fold_left 
+							  (fun zs def -> 
+							    match def with 
+							      | TypeDef _ -> zs
+							      | VarDef((x, _), _) | FunDef{ name = (Id.L(x), _); _ } -> x :: zs)
+							  [] !toplevel))))) in
       let zts = List.map (fun z -> (z, M.find z env')) zs in (* ここで自由変数zの型を引くために引数envが必要 *)
-      toplevel := { name = (Id.L(x), t); args = yts; formal_fv = zts; body = e1' } :: !toplevel; (* トップレベル関数を追加 *)
+      toplevel := FunDef{ name = (Id.L(x), t); args = yts; formal_fv = zts; body = e1' } :: !toplevel; (* トップレベル関数を追加 *)
       let e2' = g env' known' e2 in
       if S.mem x (fv e2') && (zs <> []) then (* xが変数としてe2'に出現するか。自由変数がないときは関数のまま使用する *)
 	MakeCls((x, t), { entry = Id.L(x); actual_fv = zs }, e2') (* 出現していたら削除しない *)
@@ -133,7 +171,17 @@ let rec g env known e = (* クロージャ変換ルーチン本体 (caml2html: c
 	(D.printf "eliminating closure(s) %s@." x;
 	 e2') (* 出現しなければMakeClsを削除 *)
       
-let f e =
+let f' env e = g (fst env) S.empty e
+
+let f defs = 
   toplevel := [];
-  let e' = g M.empty S.empty e in
-  Prog(List.rev !toplevel, e')
+  let _= KNormal.fold 
+    (fun env def -> let def' = 
+       match def with
+	 | KNormal.TypeDef(x, t) -> TypeDef(x, t)
+	 | KNormal.VarDef(xt, e) -> VarDef(xt, f' env e)
+	 | KNormal.RecDef({ KNormal.name = (x, t); args = yts; body = e1 }) -> FunDef({ name = (Id.L(x), t); args = yts; formal_fv = []; body = f' env e1 }) in
+       toplevel := def' :: !toplevel;
+       def')
+    M.add M.add defs in
+    Prog(List.rev !toplevel)

@@ -14,7 +14,7 @@ let lexbuf outchan l = (* バッファをコンパイルしてチャンネルへ
 			    (KNormal.f
 				(Wrap.f
 				    (Typing.f 
-					(Parser.sequence Lexer.token l))))))))))
+					(Parser.impl Lexer.token l))))))))))
 
 let file input output = (* ファイルをコンパイルしてファイルに出力する (caml2html: main_file) *)
   let inchan = open_in input in

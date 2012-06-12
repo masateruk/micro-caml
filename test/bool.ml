@@ -1,2 +1,3 @@
-let b = true in
-  ()
+let () = 
+  let b = true in
+    ()

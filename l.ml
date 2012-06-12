@@ -7,4 +7,14 @@ let rec init = function
   | (x::xs) -> x :: (init xs)
       
 let last xs = List.hd (List.rev xs)
-
+  
+let take n xs = 
+  let rec loop n xs acc =
+    match xs with
+      | [] -> acc
+      | (x::xs) -> if n == 0 then acc else loop (n - 1) xs (x::acc) in
+    loop n xs []
+      
+let zip xs ys = 
+  let l = min (List.length xs) (List.length ys) in
+    List.combine (take l xs) (take l ys)

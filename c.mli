@@ -1,14 +1,5 @@
-type ty =
-  | Void 
-  | Int
-  | Bool
-  | Fun of ty list * ty
-  | Struct of (Id.t * ty) list
-  | NameTy of Id.t * ty
-  | Box
-  | Pointer of ty
 type t =
-  | Dec of (Id.t * ty) * exp option
+  | Dec of (Id.t * CType.t) * exp option
   | Assign of exp * exp
   | Exp of exp
   | If of exp * t * t
@@ -16,12 +7,14 @@ type t =
   | Seq of t * t
   | Block of dec list * t
 and dec =
-  | VarDec of (Id.t * ty) * exp option
+  | VarDec of (Id.t * CType.t) * exp option
 and exp =
   | Nop
-  | Nil of ty
-  | BoolExp of bool
-  | IntExp of int
+  | Nil of CType.t
+  | Bool of bool
+  | Int of int
+  | Struct of Id.t * (Id.t * exp) list
+  | Field of exp * Id.t
   | Not of exp
   | Neg of exp
   | Add of exp * exp
@@ -34,24 +27,25 @@ and exp =
   | Var of Id.t
   | Cond of exp * exp * exp
   | CallDir of exp * exp list
-  | Let of (Id.t * ty) * exp * exp
-  | MakeClosure of Id.l * Id.t * (Id.t * ty) list
-  | Field of Id.t * Id.t
-  | Sizeof of ty
+  | Let of (Id.t * CType.t) * exp * exp
+  | MakeClosure of Id.l * Id.t * (Id.t * CType.t) list
+  | Sizeof of CType.t
   | Ref of exp
   | Deref of exp
-  | Cast of ty * exp
+  | Cast of CType.t * exp
   | Comma
 type fundef = {
   name : Id.l;
-  args : (Id.t * ty) list;
+  args : (Id.t * CType.t) list;
   body : t;
-  ret : ty;
+  ret : CType.t;
 }
-type def = FunDef of fundef * bool ref | TypeDef of (Id.t * ty) * bool ref
+type def = 
+  | VarDef of (Id.t * CType.t) * t
+  | FunDef of fundef * bool ref 
+  | TypeDef of (Id.t * CType.t) * bool ref
 type prog = Prog of def list
   
-val is_ty_equal : ty -> ty -> bool
 val enable_gc : bool ref
 val f : Closure.prog -> prog
 
