@@ -18,12 +18,12 @@ let rec string_of =
   | Enum(x, ys) -> "Enum(" ^ x ^ ", [" ^ (String.concat "," ys) ^ "])"
   | Fun(args, ret) -> (string_of ret) ^ " (*)(" ^ (String.concat ", " (List.map string_of args)) ^ ")" 
   | Struct(tag, xts) -> 
-      "Struct " ^ tag ^ " (\n" ^ 
-        (String.concat ";\n" (List.map (fun (x, t) -> string_of t) xts)) ^ ";\n" ^ 
+      "Struct " ^ tag ^ " (" ^ 
+        (String.concat ";" (List.map (fun (x, t) -> string_of t) xts)) ^ ";" ^ 
         ")" 
   | Union(xts) -> 
-      "Union (\n" ^ 
-        (String.concat ";\n" (List.map (fun (x, t) -> string_of t) xts)) ^ ";\n" ^ 
+      "Union (" ^ 
+        (String.concat ";\n" (List.map (fun (x, t) -> string_of t) xts)) ^ ";" ^ 
         ")" 
   | NameTy(x, { contents = Some(t) }) -> "NameTy(" ^ x ^ ", Some(" ^ (string_of t) ^ "))"
   | NameTy(x, _) -> "NameTy(" ^ x ^ ", None)"

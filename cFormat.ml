@@ -107,7 +107,7 @@ let rec string_of_prog (Prog(defs)) =
         let args' = String.concat ", " (List.map (fun (y, t) -> (string_of_id y t)) yts) in
         let body' = string_of_statement 0 s in
           t' ^ " " ^ name' ^ "(" ^ args' ^ ")\n" ^ body' ^ "\n\n"
-    | TypeDef((x, t), used) (*when !used*) ->
+    | TypeDef((x, t), used) when !used ->
         "typedef " ^ (string_of_id x t) ^ ";\n\n" 
     | VarDef((x, t), e) -> 
         (match e with Exp _ -> () | _ -> assert false);

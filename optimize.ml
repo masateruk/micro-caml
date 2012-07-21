@@ -62,8 +62,24 @@ and reduce_release_of_list e = function
 let mark_id defs x =
   List.iter (function FunDef({ name = Id.L(x'); _ }, b) when x' = x -> b := true | _ -> ()) defs
 
-let mark_ty defs t =
-  List.iter (fun def -> match t, def with CType.NameTy(x, { contents = Some(t)}), TypeDef((x', t'), b) when x' = x && CType.equal t t' -> b := true | _ -> ()) defs
+let rec mark_ty defs t =
+  let _ = D.printf "Optimaize.mark_ty %s\n" (CType.string_of t) in
+  List.iter 
+    (fun def -> 
+      match t, def with 
+      | CType.NameTy(x, { contents = Some(t) }), TypeDef((x', t'), b) when x' = x && CType.equal t t' -> 
+          begin
+            match t with
+            | CType.Fun(xs, y) -> List.iter (mark_ty defs) (y :: xs)
+            | CType.Struct(_, xts) 
+            | CType.Union(xts) -> List.iter (mark_ty defs) (List.map snd xts)
+            | CType.NameTy(_, { contents = Some(t) }) 
+            | CType.Pointer(t) -> mark_ty defs t
+            | _ -> ()
+          end;
+          b := true
+      | _ -> ()) 
+    defs
 
 let rec mark_exp defs = 
   function 
@@ -84,9 +100,10 @@ let rec mark_exp defs =
   | Cast(t, e) -> mark_ty defs t; mark_exp defs e
   | Comma -> assert false
 
-let rec mark_dec defs = function
-    | VarDec((x, t), None) -> mark_id defs x; mark_ty defs t
-    | VarDec((x, t), Some(e)) -> mark_id defs x; mark_ty defs t; mark_exp defs e
+let rec mark_dec defs = 
+  function
+  | VarDec((x, t), None) -> mark_id defs x; mark_ty defs t
+  | VarDec((x, t), Some(e)) -> mark_id defs x; mark_ty defs t; mark_exp defs e
 
 let rec mark_s defs = function
   | Dec((x, t), None) -> mark_id defs x; mark_ty defs t
@@ -99,15 +116,17 @@ let rec mark_s defs = function
   | Block(decs, s) -> List.iter (mark_dec defs) decs; mark_s defs s
 
 (* 関数定義で使用している定義にマークをつける。不要な定義を出力しないため。ただし他から呼ばれない再帰関数は使用ありとマークされるなど不完全。*)      
-let rec mark defs = function
-    | FunDef({ name = Id.L(x); args = yts; body = s; ret = t }, _) -> mark_s defs s; List.iter (fun (_, t) -> mark_ty defs t) yts; mark_ty defs t
-    | EnumDef(xs, b) -> b := true (* EnumDef は int で参照されるため強制的に使用していることにする *)
-    | def -> ()
+let rec mark defs = 
+  function
+  | FunDef({ name = Id.L(x); args = yts; body = s; ret = t }, _) -> mark_s defs s; List.iter (fun (_, t) -> mark_ty defs t) yts; mark_ty defs t
+  | EnumDef(xs, b) -> b := true (* EnumDef は int で参照されるため強制的に使用していることにする *)
+  | def -> ()
 
-let g = function
-    | FunDef({ name = Id.L(x); args = yts; body = s; ret = t }, b) ->
-	FunDef({ name = Id.L(x);  args = yts; body = reduce_addref s; ret = t }, b)
-    | def -> def
+let g = 
+  function
+  | FunDef({ name = Id.L(x); args = yts; body = s; ret = t }, b) ->
+      FunDef({ name = Id.L(x);  args = yts; body = reduce_addref s; ret = t }, b)
+  | def -> def
 	      
 let f (Prog(defs)) = 
   let defs' = List.map g defs in
