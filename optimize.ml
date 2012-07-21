@@ -101,6 +101,7 @@ let rec mark_s defs = function
 (* 関数定義で使用している定義にマークをつける。不要な定義を出力しないため。ただし他から呼ばれない再帰関数は使用ありとマークされるなど不完全。*)      
 let rec mark defs = function
     | FunDef({ name = Id.L(x); args = yts; body = s; ret = t }, _) -> mark_s defs s; List.iter (fun (_, t) -> mark_ty defs t) yts; mark_ty defs t
+    | EnumDef(xs, b) -> b := true (* EnumDef は int で参照されるため強制的に使用していることにする *)
     | def -> ()
 
 let g = function

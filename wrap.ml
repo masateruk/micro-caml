@@ -2,64 +2,68 @@
 
 open Syntax
   
-module MapSet =
-  Map.Make
-    (struct
-      type t = Type.t
-      let compare = compare
-     end)
-    
-let wrappers = ref MapSet.empty
-let unwrappers = ref MapSet.empty
+let wrappers = Hashtbl.create 64
+let unwrappers = Hashtbl.create 64
+
+let wrapper_defs = ref []
   
-let wrapper_list () = List.map snd (MapSet.bindings !wrappers)
-let unwrapper_list () = List.map snd (MapSet.bindings !unwrappers)
-  
-let new_wrapper t = 
-  match t with
-  | Type.App(Type.Bool, []) -> "_wrap_bool", Type.App(Type.Arrow, [t; Type.Var(Type.newtyvar ())])
-  | Type.App(Type.Int, []) -> "_wrap_int", Type.App(Type.Arrow, [t; Type.Var(Type.newtyvar ())])
-  | Type.App(Type.Arrow, us) -> 
-      let us' = [(Type.App(Type.Arrow, (List.map (fun _ -> (Type.Var(Type.newtyvar ()))) us))); (Type.Var(Type.newtyvar ()))] in
-      "_wrap_closure" ^ (Id.genid ""), (Type.App(Type.Arrow, us'))
-  | _ -> Printf.eprintf "not implemented.\n"; assert false
+let gen_wrapper t = 
+  let x, t' = 
+    match t with
+    | Type.App(Type.Bool, []) 
+    | Type.App(Type.Int, []) 
+    | Type.App(Type.Record(_, _), _) 
+    | Type.App(Type.Tuple, _) -> "_wrap_" ^ (Type.name t), t
+    | Type.App(Type.Arrow, us) -> 
+        "_wrap_closure" ^ (Id.genid ""), (Type.App(Type.Arrow, (List.map (fun _ -> (Type.Var(Type.newtyvar ()))) us)))
+    | Type.NameTy(x, { contents = Some(Type.App(Type.Variant(_), _)) }) ->
+        "_wrap_" ^ x, t
+    | _ -> Printf.eprintf "not implemented.\n"; assert false in
+  let ft = Type.App(Type.Arrow, [t'; Type.Var(Type.newtyvar ())]) in  
+  let y = Id.gentmp (Type.prefix t') in  
+  x, RecDef({ name = (x, ft); args = [(y, t')]; body = WrapBody(y, t') })
     
-let wrapper t = 
+let gen_unwrapper t = 
+  let x, t' = 
+    match t with
+    | Type.App(Type.Bool, []) 
+    | Type.App(Type.Int, []) 
+    | Type.App(Type.Record(_, _), _) 
+    | Type.App(Type.Tuple, _) -> "_unwrap_" ^ (Type.name t), t
+    | Type.App(Type.Arrow, us) -> 
+        "_unwrap_closure" ^ (Id.genid ""), (Type.App(Type.Arrow, (List.map (fun _ -> Type.Var(Type.newtyvar ())) us)))
+    | Type.NameTy(x, { contents = Some(Type.App(Type.Variant(_), _)) }) ->
+        "_unwrap_" ^ x, t
+    | _ -> Printf.eprintf "not implemented.\n"; assert false in
+  let tyvar = Type.Var(Type.newtyvar ()) in
+  let ft = Type.App(Type.Arrow, [tyvar; t']) in  
+  let y = Id.gentmp (Type.prefix tyvar) in  
+  x, RecDef({ name = (x, ft); args = [(y, tyvar)]; body = UnwrapBody(y, t') })
+    
+let get_wrapper f table t =
   try
-    fst (MapSet.find t !wrappers)
+    Hashtbl.find table t
   with
     Not_found ->
-      let name, t' = new_wrapper t in
-      wrappers := MapSet.add t (name, t') !wrappers;
+      let name, def = f t in
+      Hashtbl.add table t name;
+      wrapper_defs := def :: !wrapper_defs;
       name
         
-let new_unwrapper t = 
-  match t with
-  | Type.App(Type.Bool, []) -> "_unwrap_bool", Type.App(Type.Arrow, [Type.Var(Type.newtyvar ()); t])
-  | Type.App(Type.Int, []) -> "_unwrap_int", Type.App(Type.Arrow, [Type.Var(Type.newtyvar ()); t])
-  | Type.App(Type.Arrow, us) -> "_unwrap_closure" ^ (Id.genid ""), Type.App(Type.Arrow, [Type.Var(Type.newtyvar ());
-											 (Type.App(Type.Arrow, (List.map (fun _ -> Type.Var(Type.newtyvar ())) us)))])
-  | _ -> Printf.eprintf "not implemented.\n"; assert false
-    
-let unwrapper t = 
-  try
-    fst (MapSet.find t !unwrappers)
-  with
-    Not_found ->
-      let name, t' = new_unwrapper t in
-      unwrappers := MapSet.add t (name,  t') !unwrappers;
-      name
-        
+let wrapper = get_wrapper gen_wrapper wrappers
+let unwrapper = get_wrapper gen_unwrapper unwrappers
+
 let rec has_tyvar t = 
   match t with
   | Type.Var _ -> true
+  | Type.Field(_, s) -> has_tyvar s
   | Type.App(Type.TyFun(_, s), us) -> (has_tyvar s) && (List.exists has_tyvar us)
   | Type.App(_, us) -> List.exists has_tyvar us
   | Type.Poly(_, s) -> has_tyvar s
   | Type.Meta({ contents = None }) -> false
   | Type.Meta({ contents = Some(t') }) -> has_tyvar t'
   | Type.NameTy(_, { contents = Some(t') }) -> has_tyvar t'
-  | _  -> assert false
+  | Type.NameTy(_, { contents = None }) -> assert false (* impossible *)
       
 (* 関数適応時の引数の包み込み。Tiger本の p.345 *)
 let rec wrap (e, s) t = 
@@ -70,9 +74,11 @@ let rec wrap (e, s) t =
   | Type.Field(_, s), t -> wrap (e, s) t
   | s, Type.Field(_, t) -> wrap (e, s) t
   | Type.Var _, Type.Var _ -> e
-  | Type.App(Type.Bool, []), Type.Var _ -> 
-      App(Var(wrapper s), [e])
-  | Type.App(Type.Int, []), Type.Var _ -> 
+  | Type.App(Type.Bool, []), Type.Var _ 
+  | Type.App(Type.Int, []), Type.Var _ 
+  | Type.App(Type.Record _, _), Type.Var _ 
+  | Type.App(Type.Tuple, _), Type.Var _ 
+  | Type.NameTy(_, { contents = Some(Type.App(Type.Variant(_), [])) }), Type.Var _ ->
       App(Var(wrapper s), [e])
   | Type.App(Type.Arrow, us), Type.Var _ -> 
       let yts = List.map (fun u -> (Id.gentmp (Type.prefix u), Type.Var(Type.newtyvar ()))) (L.init us) in
@@ -100,8 +106,8 @@ let rec wrap (e, s) t =
 		     body = unwrap (App(e, List.map2 (fun (y, t) u -> unwrap (Var(y), t) u) yts (L.init us)), (L.last us)) r }, 
 		   Var("_fw"))
       end
-  | s, t when s = t -> e
-  | _ -> Printf.eprintf "not implemented.\n"; assert false
+  | s, t when Type.equal s t -> e
+  | s, t -> Printf.eprintf "not implemented. \ns = %s\nt = %s\n" (Type.string_of s) (Type.string_of t); assert false
     
 and unwrap (e, s) t = 
   let _ = D.printf "Wrap.unwrap \n  (e = %s,\n   s = %s)\n  ,t = %s\n" (string_of_exp e) (Type.string_of s) (Type.string_of t) in
@@ -109,9 +115,11 @@ and unwrap (e, s) t =
   | Type.Poly([], s), t -> unwrap (e, s) t
   | s, Type.Poly([], t) -> unwrap (e, s) t
   | Type.Var _, Type.Var _ -> e
-  | Type.Var _, Type.App(Type.Bool, []) -> 
-      App(Var(unwrapper t), [e])
-  | Type.Var _, Type.App(Type.Int, []) -> 
+  | Type.Var _, Type.App(Type.Bool, []) 
+  | Type.Var _, Type.App(Type.Int, []) 
+  | Type.Var _, Type.App(Type.Record _, _) 
+  | Type.Var _, Type.App(Type.Tuple, _) 
+  | Type.Var _, Type.NameTy(_, { contents = Some(Type.App(Type.Variant(_), [])) }) ->
       App(Var(unwrapper t), [e])
   | Type.Var _, Type.App(Type.Arrow, vs) ->
       let e' = 
@@ -154,6 +162,9 @@ let rec g env e =
       let xes' = List.map (fun (x, e) -> x, (fst (g env e))) xes in 
       Record(xes'), M.find (fst (List.hd xes)) tenv
   | Field(e, x) -> let e', _ = g env e in Field(e', x), M.find x tenv
+  | Tuple(es) -> 
+      let ets' = List.map (g env) es in
+      Tuple(List.map fst ets'), Type.App(Type.Tuple, List.map snd ets')
   | Not(e) -> let e', _ = g env e in Not(e'), Type.App(Type.Bool, [])
   | Neg(e) -> let e', _ = g env e in Neg(e'), Type.App(Type.Int, [])
   | Add(e1, e2) -> 
@@ -191,6 +202,14 @@ let rec g env e =
       LetVar((x, t), e1', e2'), t2
   | Var(x) when M.mem x !Typing.extenv -> Var(x), (M.find x !Typing.extenv)
   | Var(x) -> Var(x), (M.find x venv)
+  | Constr(x, []) -> Constr(x, []), (M.find x venv)
+  | Constr(x, es) -> 
+      let ets' = List.map (g env) es in
+      begin
+        match M.find x venv with
+        | Type.App(Type.Arrow, ts') as t -> Constr(x, List.map fst ets'), Type.apply t (List.map snd ets')
+        | t -> Printf.eprintf "invalid type : t = %s\n" (Type.string_of t); assert false
+      end
   | LetRec({ name = (x, t); args = yts; body = e1 }, e2) -> 
       let e1', _ = g ((M.add_list yts (M.add x t venv)), tenv) e1 in
       let e2', t2 = g ((M.add x t venv), tenv) e2 in
@@ -207,7 +226,8 @@ let rec g env e =
 	  let r', ys' = match t' with Type.App(Type.Arrow, ys') -> L.last ys', ys' | _ -> assert false in
 	  (unwrap (App(e', List.map2 wrap ets' (L.init ys)), (L.last ys)) r'), r'
       | _ -> Printf.eprintf "invalid type : %s\n" (Type.string_of t); assert false)
-  | _ -> Printf.eprintf "not implemented.\n"; assert false    
+  | WrapBody _ | UnwrapBody _ -> Printf.eprintf "impossible.\n"; assert false 
+  | Cons _ | Nil _ -> Printf.eprintf "not implemented.\n"; assert false 
     
 let f' env e = 
   let e', _ = g env e in
@@ -215,12 +235,18 @@ let f' env e =
     
 let f defs = 
   let defs' = 
-    fold (fun env -> 
-      function    
-      | TypeDef(x, t) -> TypeDef(x, t)
-      | VarDef((x, t), e) -> VarDef((x, t), f' env e)
-      | RecDef({ name = (x, t); args = yts; body = e }) -> RecDef({ name = (x, t); args = yts; body = f' env e }))
+    fold (fun (env, defs) def -> 
+      match def with
+      | TypeDef(x, t) -> TypeDef(x, t) :: defs
+      | VarDef((x, t), e) -> 
+          let e' = f' env e in
+          let defs' = !wrapper_defs @ defs in
+          wrapper_defs := [];
+          VarDef((x, t), e') :: defs'
+      | RecDef({ name = (x, t); args = yts; body = e }) -> 
+          let e' = f' env e in
+          let defs' = !wrapper_defs @ defs in
+          wrapper_defs := [];
+          RecDef({ name = (x, t); args = yts; body = e' }) :: defs')
       defs in
-  MapSet.iter (fun _ (name, t) -> Typing.extenv := M.add name t !Typing.extenv) !wrappers;
-  MapSet.iter (fun _ (name, t) -> Typing.extenv := M.add name t !Typing.extenv) !unwrappers;
   defs'

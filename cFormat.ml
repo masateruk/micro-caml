@@ -21,10 +21,17 @@ let rec string_of_type ?(depth = 0) ?(tags = []) =
   | CType.Void -> (indent depth) ^ "void" 
   | CType.Bool -> (indent depth) ^ "bool"
   | CType.Int -> (indent depth) ^ "int"
+  | CType.Enum(name, xs) -> (indent depth) ^ "enum " ^ name ^ " {\n" ^
+      (String.concat ",\n" (List.map (fun x -> (indent (depth + 1)) ^ x) xs)) ^ "\n" ^ 
+    (indent depth) ^ "}"
   | CType.Fun _ -> assert false
   | CType.Struct(tag, xts) ->
       (indent depth) ^ "struct" ^ (if tag = "" then "" else " " ^ tag) ^ " {\n" ^ 
         (String.concat ";\n" (List.map (fun (x, t) -> string_of_id ~depth:(depth + 1) ~tags:(tag::tags) x t) xts)) ^ ";\n" ^ 
+        (indent depth) ^ "}"
+  | CType.Union(xts) ->
+      (indent depth) ^ "union {\n" ^ 
+        (String.concat ";\n" (List.map (fun (x, t) -> string_of_id ~depth:(depth + 1) x t) xts)) ^ ";\n" ^ 
         (indent depth) ^ "}"
   | CType.NameTy(x', _) when List.mem x' tags -> (indent depth) ^ "struct " ^ x'
   | CType.NameTy(x', _) -> (indent depth) ^ x'
@@ -100,11 +107,15 @@ let rec string_of_prog (Prog(defs)) =
         let args' = String.concat ", " (List.map (fun (y, t) -> (string_of_id y t)) yts) in
         let body' = string_of_statement 0 s in
           t' ^ " " ^ name' ^ "(" ^ args' ^ ")\n" ^ body' ^ "\n\n"
-    | TypeDef((x, t), used) when !used ->
+    | TypeDef((x, t), used) (*when !used*) ->
         "typedef " ^ (string_of_id x t) ^ ";\n\n" 
     | VarDef((x, t), e) -> 
         (match e with Exp _ -> () | _ -> assert false);
         (string_of_id x t) ^ " = " ^ (string_of_statement 0 e) ^ ";\n\n" 
+    | EnumDef(xs, used) when !used ->
+        "enum {\n" ^ 
+          (String.concat ",\n" (List.map (fun x -> (indent 1) ^ x) xs)) ^ "\n" ^ 
+          "};\n\n" 
     | _ -> "" in
     "#include <ucaml.h>\n" ^ 
       (if !enable_gc then "#include <gc.h>\n" else "") ^ 

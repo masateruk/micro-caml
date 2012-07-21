@@ -18,3 +18,15 @@ let take n xs =
 let zip xs ys = 
   let l = min (List.length xs) (List.length ys) in
     List.combine (take l xs) (take l ys)
+
+let rec is_sub eq xs ys =
+  match xs, ys with
+  | [], _ -> true
+  | _, [] -> false
+  | (x::xs), (y::ys) -> (eq x y) && (is_sub eq xs ys)
+
+let rec sub eq xs ys =
+  match xs, ys with
+  | [], _ -> []
+  | xs, [] -> xs
+  | (x::xs), (y::ys) -> assert (eq x y); sub eq xs ys

@@ -2,6 +2,8 @@ type closure = { entry : Id.l; actual_fv : Id.t list }
 type t = 
   | Unit
   | Nil of Type.t
+  | WrapBody of Id.t * Type.t
+  | UnwrapBody of Id.t * Type.t
   | Exp of e
   | Cons of Id.t * Id.t
   | If of e * t * t
@@ -12,6 +14,7 @@ and e =
   | Int of int
   | Record of (Id.t * e) list
   | Field of e * Id.t
+  | Tuple of e list
   | Not of e
   | Neg of e
   | Add of e * e
@@ -21,6 +24,7 @@ and e =
   | Eq of e * e
   | LE of e * e
   | Var of Id.t
+  | Constr of Id.t * e list
   | App of e * e list
   | AppDir of Id.l * e list
 type fundef = {

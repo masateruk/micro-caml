@@ -71,18 +71,28 @@ rule token = parse
     { REC }
 | "type"
     { TYPE }
+| "of"
+    { OF }
 | '_'
     { IDENT(Id.gentmp (Type.prefix (Type.App(Type.Unit, [])))) }
 | ':'
     { COLON }
 | ';'
     { SEMICOLON }
+| ','
+    { COMMA }
 | '.'
     { DOT }
+| '|'
+    { PIPE }
+| '*'
+    { AST }
 | eof
     { EOF }
 | lower (digit|lower|upper|'_')* (* 他の「予約語」より後でないといけない *)
     { IDENT(Lexing.lexeme lexbuf) }
+| upper (digit|lower|upper|'_')*
+    { UIDENT(Lexing.lexeme lexbuf) }
 | _
     { failwith
 	(Printf.sprintf "unknown token %s near characters %d-%d"

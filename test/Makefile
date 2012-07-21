@@ -64,7 +64,7 @@ endif
 %.ocaml.log: %.ocaml.out
 	./$*.ocaml.out > $*.ocaml.log
 
-%.diff: %.log %.ocaml.log
+%.diff: %.ocaml.log %.log
 	diff $*.log $*.ocaml.log
 
 clean:

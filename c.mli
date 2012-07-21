@@ -44,6 +44,7 @@ type def =
   | VarDef of (Id.t * CType.t) * t
   | FunDef of fundef * bool ref 
   | TypeDef of (Id.t * CType.t) * bool ref
+  | EnumDef of Id.t list * bool ref
 type prog = Prog of def list
   
 val enable_gc : bool ref

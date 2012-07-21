@@ -1,5 +1,6 @@
 SOURCES = d.ml l.ml id.ml m.ml type.mli type.ml syntax.ml parser.mly lexer.mll s.ml typing.mli typing.ml wrap.mli wrap.ml kNormal.mli kNormal.ml alpha.mli alpha.ml assoc.mli assoc.ml closure.mli closure.ml cType.ml c.mli c.ml optimize.ml cFormat.ml main.ml
 RESULT = ucaml
+LIBS = str
 
 ifneq ($(shell which ocp-ocamlc.opt),)
 OCAMLC = ocp-ocamlc.opt

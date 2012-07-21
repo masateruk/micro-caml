@@ -21,7 +21,8 @@ let rec subst env =
       Type.Poly(ys, subst env t')
   | Type.Meta{ contents = Some(t) } -> subst env t
   | Type.Meta{ contents = None } as t -> t
-  | Type.NameTy(x, _) -> subst env (M.find x tenv)
+  | Type.NameTy(x, { contents = None }) -> subst env (M.find x tenv)
+  | Type.NameTy(x, { contents = Some(t) }) -> subst env t
           
 let rec occur tenv x = (* occur check (caml2html: typing_occur) *)
   function 
@@ -30,7 +31,8 @@ let rec occur tenv x = (* occur check (caml2html: typing_occur) *)
   | Type.Poly(_, t) -> occur tenv x t
   | Type.Meta{ contents = Some(t) } -> occur tenv x t
   | Type.Meta(y) -> x == y
-  | Type.NameTy(y, _) -> occur tenv x (M.find y tenv)
+  | Type.NameTy(y, { contents = None }) -> occur tenv x (M.find y tenv)
+  | Type.NameTy(y, { contents = Some(t) }) -> occur tenv x t
   | _ -> false
       
 let rec unify tenv t1 t2 = (* 型が合うように、メタ型変数への代入をする. 成功したら () を返す. (caml2html: typing_unify) *)
@@ -41,6 +43,9 @@ let rec unify tenv t1 t2 = (* 型が合うように、メタ型変数への代�
   | Type.App(Type.Int, xs), Type.App(Type.Int, ys) 
   | Type.App(Type.Arrow, xs), Type.App(Type.Arrow, ys) -> List.iter2 (unify tenv) xs ys
   | Type.App(Type.Record(x, fs), xs), Type.App(Type.Record(y, fs'), ys) when fs = fs' -> List.iter2 (unify tenv) xs ys
+  | Type.App(Type.Variant(_, xtts), xs), Type.App(Type.Variant(_, ytts), ys) -> 
+      List.iter2 (fun (_, xs) (_, ys) -> List.iter2 (unify tenv) xs ys) xtts ytts;
+      List.iter2 (unify tenv) xs ys
   | Type.App(Type.TyFun(xs, u), ys), t2 -> unify tenv (subst ((M.add_list2 xs ys M.empty), M.empty) u) t2
   | t1, Type.App(Type.TyFun(xs, u), ys) -> unify tenv t1 (subst ((M.add_list2 xs ys M.empty), M.empty) u)
   | Type.Poly([], u1), t2 -> unify tenv u1 t2
@@ -76,6 +81,9 @@ let rec equal tenv t1 t2 =
   | Type.App(Type.Bool, xs), Type.App(Type.Bool, ys) 
   | Type.App(Type.Int, xs), Type.App(Type.Int, ys) 
   | Type.App(Type.Arrow, xs), Type.App(Type.Arrow, ys) -> List.for_all2 (equal tenv) xs ys
+  | Type.App(Type.Record(x, _), xs), Type.App(Type.Record(y, _), ys) 
+  | Type.App(Type.Variant(x, _), xs), Type.App(Type.Variant(y, _), ys) when List.length xs = List.length ys -> 
+      x = y && List.for_all2 (equal tenv) xs ys
   | Type.App(Type.TyFun(xs, u), ys), t2 -> equal tenv (subst ((M.add_list2 xs ys M.empty), M.empty) u) t2
   | Type.Poly([], u1), t2 -> equal tenv u1 t2
   | t1, Type.Poly([], u2) -> equal tenv t1 u2
@@ -143,6 +151,7 @@ let rec instantiate tenv =
 let rec deref_typ tenv = (* 型変数を中身でおきかえる関数 (caml2html: typing_deref) *)
   function
   | Type.App(Type.TyFun(xs, t), ys) -> Type.App(Type.TyFun(xs, deref_typ tenv t), List.map (deref_typ tenv) ys)
+  | Type.App(Type.Variant(x, ytss), ts) -> Type.App(Type.Variant(x, List.map (fun (y, ts) -> y, List.map (deref_typ tenv) ts) ytss), List.map (deref_typ tenv) ts)
   | Type.App(x, ys) -> Type.App(x, List.map (deref_typ tenv) ys)
   | Type.Poly(xs, t) -> Type.Poly(xs, deref_typ tenv t)
   | Type.Meta({ contents = None } as r) ->
@@ -186,7 +195,7 @@ let rec deref_term tenv =
       
 let rec g env e = (* 型推論ルーチン (caml2html: typing_g) *)
   let venv, tenv = env in
-  let _ = D.printf "Typing.g %s\n" (string_of_exp e) in
+  let _ = D.printf "Typing.g %s!\n" (string_of_exp e) in
   try
     match e with
     | Unit -> Type.App(Type.Unit, [])
@@ -211,6 +220,8 @@ let rec g env e = (* 型推論ルーチン (caml2html: typing_g) *)
               t
           | t -> Printf.eprintf "invalid type : t = %s\n" (Type.string_of t); assert false
         end
+    | Tuple(es) ->
+        Type.App(Type.Tuple, List. map (g env) es)
     | Not(e) ->
         unify tenv (Type.App(Type.Bool, [])) (g env e);
         Type.App(Type.Bool, [])
@@ -253,6 +264,15 @@ let rec g env e = (* 型推論ルーチン (caml2html: typing_g) *)
         let t = Type.Meta(Type.newmetavar ()) in
         extenv := M.add x t !extenv;
         instantiate tenv t
+    | Constr(x, []) -> M.find x venv
+    | Constr(x, es) -> 
+        let ts = List.map (g env) es in
+        let () = D.printf "Constr() : %s" (Type.string_of (M.find x venv)) in
+        begin
+          match (M.find x venv) with
+          | Type.App(Type.Arrow, ts') as t -> List.iter2 (unify tenv) ts (L.init ts'); Type.apply t ts
+          | t -> Printf.eprintf "invalid type : t = %s\n" (Type.string_of t); assert false
+        end
     | LetRec({ name = (x, t); args = yts; body = e1 }, e2) -> (* let recの型推論 (caml2html: typing_letrec) *)
         let t2 = Type.Meta(Type.newmetavar()) in
         let t' = Type.App(Type.Arrow, ((List.map snd yts) @ [t2])) in
@@ -267,6 +287,8 @@ let rec g env e = (* 型推論ルーチン (caml2html: typing_g) *)
         let result = Type.Meta(Type.newmetavar ()) in
         unify tenv e' (Type.App(Type.Arrow, es' @ [result]));
         result
+    | WrapBody(_, t) -> t
+    | UnwrapBody(_, t) -> t
   with Unify(t1, t2) -> 
     let _ = D.printf "Typing.g error %s : %s and %s\n" (string_of_exp e) (Type.string_of t1) (Type.string_of t2) in
     raise (Error(deref_term tenv e, deref_typ tenv t1, deref_typ tenv t2))
@@ -280,16 +302,15 @@ let f' env (e, t) =
   deref_term tenv e
     
 let f = 
-  fold (fun env -> 
+  fold (fun (env, defs) def ->
     let venv, tenv = env in
-      function    
-      | TypeDef(x, t) -> 
-          TypeDef(x, deref_typ (M.add x t tenv) t)
-      | VarDef((x, t), e) -> 
-          let e' = f' env (e, t) in
-            VarDef((x, deref_typ tenv t), e')
-      | RecDef({ name = (x, t); args = yts; body = e }) -> 
-          let venv, tenv = env in
-          let e' = f' ((M.add_list yts (M.add x t venv)), tenv) (e, t) in
-            RecDef({ name = (x, deref_typ tenv t); args = List.map (fun (y, t) -> (y, deref_typ tenv t)) yts; body = e' }))
-    
+    match def with
+    | TypeDef(x, t) -> 
+        TypeDef(x, deref_typ (M.add x t tenv) t) :: defs
+    | VarDef((x, t), e) -> 
+        let e' = f' env (e, t) in
+        VarDef((x, deref_typ tenv t), e') :: defs
+    | RecDef({ name = (x, t); args = yts; body = e }) -> 
+        let venv, tenv = env in
+        let e' = f' ((M.add_list yts (M.add x t venv)), tenv) (e, t) in
+        RecDef({ name = (x, deref_typ tenv t); args = List.map (fun (y, t) -> (y, deref_typ tenv t)) yts; body = e' }) :: defs)

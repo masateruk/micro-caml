@@ -2,6 +2,8 @@ type closure = { entry : Id.l; actual_fv : Id.t list }
 type t = (* クロージャ変換後の式 (caml2html: closure_t) *)
   | Unit
   | Nil of Type.t
+  | WrapBody of Id.t * Type.t
+  | UnwrapBody of Id.t * Type.t
   | Exp of e
   | Cons of Id.t * Id.t
   | If of e * t * t
@@ -12,6 +14,7 @@ and e =
   | Int of int
   | Record of (Id.t * e) list
   | Field of e * Id.t
+  | Tuple of e list
   | Not of e
   | Neg of e
   | Add of e * e
@@ -21,6 +24,7 @@ and e =
   | Eq of e * e
   | LE of e * e
   | Var of Id.t
+  | Constr of Id.t * e list
   | App of e * e list
   | AppDir of Id.l * e list
 type fundef = { name : Id.l * Type.t;
@@ -39,6 +43,7 @@ let rec string_of_e =
   | Int(n) -> string_of_int n
   | Record(xes) -> "{" ^ (String.concat "; " (List.map (fun (x, e) -> x ^ " = " ^ (string_of_e e)) xes)) ^ "}"
   | Field(e, x) -> (string_of_e e) ^ "." ^ x
+  | Tuple(es) -> "(" ^ (String.concat ", " (List.map string_of_e es)) ^ ")"
   | Not(e) -> "not " ^ (string_of_e e)
   | Neg(e) -> "! " ^ (string_of_e e)
   | Add(e1, e2) -> (string_of_e e1) ^ " + " ^ (string_of_e e2)
@@ -48,13 +53,16 @@ let rec string_of_e =
   | Eq(e1, e2) -> (string_of_e e1) ^ " = " ^ (string_of_e e2)
   | LE(e1, e2) -> (string_of_e e1) ^ " <= " ^ (string_of_e e2) 
   | Var(x) -> x
-  | App(e, args) -> "apply_closure " ^ (string_of_e e) ^ " " ^ (String.concat " " (List.map string_of_e args))
+  | Constr(x, es) -> "Constr(" ^ x ^ ", [" ^ (String.concat "; " (List.map string_of_e es)) ^ "])"
+  | App(e, args) -> "App(" ^ (string_of_e e) ^ ", [" ^ (String.concat "; " (List.map string_of_e args)) ^ "])"
   | AppDir(Id.L(x), args) -> x ^ " " ^ (String.concat " " (List.map string_of_e args))
       
 let rec string_of_exp = 
   function
   | Unit -> "()"
   | Nil _ -> "[]"
+  | WrapBody _ -> "(* wrapper *)"
+  | UnwrapBody _ -> "(* unwrapper *)"
   | Exp(e) -> string_of_e e
   | Cons(s1, s2) -> s1 ^ " :: " ^ s2
   | If(e, e1, e2) -> "if " ^ (string_of_e e) ^ "\n\tthen " ^ (string_of_exp e1) ^ "\n\telse " ^ (string_of_exp e2)
@@ -76,15 +84,17 @@ let rec fv_of_e =
   | Bool(_) | Int(_) -> S.empty
   | Record(xes) -> List.fold_left (fun s (_, e) -> S.union s (fv_of_e e)) S.empty xes
   | Field(e, _) -> fv_of_e e
+  | Tuple(es) -> List.fold_left (fun s e -> S.union s (fv_of_e e)) S.empty es
   | Not(e) | Neg(e) -> fv_of_e e
   | Add(e1, e2) | Sub(e1, e2) | Mul(e1, e2) | Div(e1, e2) | Eq(e1, e2) | LE(e1, e2) -> S.union (fv_of_e e1) (fv_of_e e2)
   | Var(x) -> S.singleton x
+  | Constr(x, es) -> List.fold_left (fun s e -> S.union s (fv_of_e e)) (S.singleton x) es
   | App(e, es) -> List.fold_left (fun s e -> S.union s (fv_of_e e)) S.empty (e :: es)
   | AppDir(_, es) -> List.fold_left (fun s e -> S.union s (fv_of_e e)) S.empty es
       
 let rec fv = 
   function
-  | Unit | Nil(_) -> S.empty
+  | Unit | Nil _ | WrapBody _ | UnwrapBody _ -> S.empty
   | Exp(e) -> fv_of_e e
   | Cons(x, y) -> S.of_list [x; y]
   | If(e, e1, e2) -> S.union (fv_of_e e) (S.union (fv e1) (fv e2))
@@ -100,8 +110,10 @@ let rec h env known e =
   | KNormal.Int(i) -> Int(i)
   | KNormal.Record(xes) -> Record(List.map (fun (x, e) -> x, h env known e) xes)
   | KNormal.Field(e, x) -> Field(h env known e, x)
+  | KNormal.Tuple(es) -> Tuple(List.map (h env known) es)
   | KNormal.Not(e) -> Not(h env known e)
   | KNormal.Var(x) -> Var(x)
+  | KNormal.Constr(x, es) -> Constr(x, List.map (h env known) es)
   | KNormal.Neg(e) -> Neg(h env known e)
   | KNormal.Add(e1, e2) -> Add(h env known e1, h env known e2)
   | KNormal.Sub(e1, e2) -> Sub(h env known e1, h env known e2)
@@ -122,6 +134,8 @@ let rec g env known e = (* クロージャ変換ルーチン本体 (caml2html: c
   match e with 
   | KNormal.Unit -> Unit
   | KNormal.Nil(t) -> Nil(t)
+  | KNormal.WrapBody(x, t) -> WrapBody(x, t)
+  | KNormal.UnwrapBody(x, t) -> UnwrapBody(x, t)
   | KNormal.Exp(e) -> Exp(h env known e)
   | KNormal.Cons(x, y) -> assert false (* not implemented *)
   | KNormal.If(e, e1, e2) -> If(h env known e, g env known e1, g env known e2)
@@ -173,15 +187,23 @@ let rec g env known e = (* クロージャ変換ルーチン本体 (caml2html: c
       
 let f' env e = g (fst env) S.empty e
 
-let f defs = 
+let f defs =
   toplevel := [];
-  let _= KNormal.fold 
-    (fun env def -> let def' = 
-       match def with
-	 | KNormal.TypeDef(x, t) -> TypeDef(x, t)
-	 | KNormal.VarDef(xt, e) -> VarDef(xt, f' env e)
-	 | KNormal.RecDef({ KNormal.name = (x, t); args = yts; body = e1 }) -> FunDef({ name = (Id.L(x), t); args = yts; formal_fv = []; body = f' env e1 }) in
-       toplevel := def' :: !toplevel;
-       def')
-    M.add M.add defs in
-    Prog(List.rev !toplevel)
+  let _ = KNormal.fold
+    (fun ((venv, tenv), defs) def ->
+      let env', def' = 
+        match def with 
+        | KNormal.TypeDef(x, t) -> 
+            ((M.add_list (Type.ids t) venv), (M.add_list ((x, t) :: (Type.types t)) tenv)), (TypeDef(x, t))
+        | KNormal.VarDef((x, t), e) -> 
+            ((M.add x t venv), tenv), (VarDef((x, t), f' (venv, tenv) e))
+        | KNormal.RecDef({ KNormal.name = (x, t); args = yts; body = e1 }) ->
+            let env' = (M.add x t venv), tenv in
+            env', (FunDef({ name = (Id.L(x), t); args = yts; formal_fv = []; body = f' env' e1 })) in
+      toplevel := def' :: !toplevel;
+      (env', def' :: defs))
+    (M.empty, M.empty) defs in
+  Prog(List.rev !toplevel)
+
+    
+    

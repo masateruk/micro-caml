@@ -12,3 +12,9 @@ let genid s =
   Printf.sprintf "_%s%d" s !counter
 
 let gentmp = genid
+
+let to_upper s = 
+  String.uppercase (Str.global_replace (Str.regexp "\\([a-z0-9]\\)\\([A-Z]+\\)") "\\1_\\2" s)
+
+let to_lower s =
+  String.concat "" (List.map (fun s -> String.capitalize (String.lowercase s)) (Str.split (Str.regexp "_") s))
