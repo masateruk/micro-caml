@@ -7,6 +7,7 @@ type t = (* クロージャ変換後の式 (caml2html: closure_t) *)
   | Exp of e
   | Cons of Id.t * Id.t
   | If of e * t * t
+  | MATCH of Id.t * (pattern * t) list
   | Let of (Id.t * Type.t) * t * t
   | MakeCls of (Id.t * Type.t) * closure * t
 and e = 
@@ -16,6 +17,8 @@ and e =
   | Field of e * Id.t
   | Tuple of e list
   | Not of e
+  | And of e * e
+  | Or of e * e
   | Neg of e
   | Add of e * e
   | Sub of e * e
@@ -27,6 +30,13 @@ and e =
   | Constr of Id.t * e list
   | App of e * e list
   | AppDir of Id.l * e list
+and pattern =
+  | PtBool of bool
+  | PtInt of int
+  | PtVar of Id.t
+  | PtTuple of pattern list
+  | PtField of (Id.t * pattern) list
+  | PtConstr of Id.t * pattern list
 type fundef = { name : Id.l * Type.t;
 		args : (Id.t * Type.t) list;
 		formal_fv : (Id.t * Type.t) list;
@@ -37,6 +47,15 @@ and def =
   | FunDef of fundef
 type prog = Prog of def list
 
+let rec string_of_pattern =
+  function
+  | PtBool(b) -> string_of_bool b
+  | PtInt(n) -> string_of_int n
+  | PtVar(x) -> x
+  | PtTuple(ps) -> String.concat ", " (List.map string_of_pattern ps)
+  | PtField(xps) -> String.concat ", " (List.map (fun (x, p) -> x ^ ", " ^ (string_of_pattern p)) xps)
+  | PtConstr(x, ps) -> x ^ ", " ^ (String.concat ", " (List.map string_of_pattern ps))
+
 let rec string_of_e = 
   function
   | Bool(b) -> string_of_bool b
@@ -45,6 +64,8 @@ let rec string_of_e =
   | Field(e, x) -> (string_of_e e) ^ "." ^ x
   | Tuple(es) -> "(" ^ (String.concat ", " (List.map string_of_e es)) ^ ")"
   | Not(e) -> "not " ^ (string_of_e e)
+  | And(e1, e2) -> (string_of_e e1) ^ " && " ^ (string_of_e e2)
+  | Or(e1, e2) -> (string_of_e e1) ^ " || " ^ (string_of_e e2)
   | Neg(e) -> "! " ^ (string_of_e e)
   | Add(e1, e2) -> (string_of_e e1) ^ " + " ^ (string_of_e e2)
   | Sub(e1, e2) -> (string_of_e e1) ^ " - " ^ (string_of_e e2)
@@ -66,6 +87,7 @@ let rec string_of_exp =
   | Exp(e) -> string_of_e e
   | Cons(s1, s2) -> s1 ^ " :: " ^ s2
   | If(e, e1, e2) -> "if " ^ (string_of_e e) ^ "\n\tthen " ^ (string_of_exp e1) ^ "\n\telse " ^ (string_of_exp e2)
+  | MATCH(x, pes) -> "match " ^ x ^ " with\n" ^ (String.concat "\n" (List.map (fun (p, e) -> " | " ^ (string_of_pattern p) ^ " -> " ^ (string_of_exp e)) pes))
   | Let((s1, t), e1, e2) -> "let " ^ s1 ^ " : " ^ (Type.ocaml_of t) ^ " = " ^ (string_of_exp e1) ^ " in\n" ^ (string_of_exp e2)
   | MakeCls((x, t), { entry = Id.L(l); actual_fv = ys }, e) -> "let " ^ x ^ " : closure = make_closure " ^ l ^ " " ^ (String.concat ", " ys) ^ " in " ^ (string_of_exp e)
       
@@ -86,6 +108,7 @@ let rec fv_of_e =
   | Field(e, _) -> fv_of_e e
   | Tuple(es) -> List.fold_left (fun s e -> S.union s (fv_of_e e)) S.empty es
   | Not(e) | Neg(e) -> fv_of_e e
+  | And(e1, e2) | Or(e1, e2) 
   | Add(e1, e2) | Sub(e1, e2) | Mul(e1, e2) | Div(e1, e2) | Eq(e1, e2) | LE(e1, e2) -> S.union (fv_of_e e1) (fv_of_e e2)
   | Var(x) -> S.singleton x
   | Constr(x, es) -> List.fold_left (fun s e -> S.union s (fv_of_e e)) (S.singleton x) es
@@ -98,11 +121,21 @@ let rec fv =
   | Exp(e) -> fv_of_e e
   | Cons(x, y) -> S.of_list [x; y]
   | If(e, e1, e2) -> S.union (fv_of_e e) (S.union (fv e1) (fv e2))
+  | MATCH(x, pes) -> (List.fold_left (fun s (p, e) -> S.union s (fv e)) S.empty pes)
   | Let((x, t), e1, e2) -> S.union (fv e1) (S.remove x (fv e2))
   | MakeCls((x, t), { entry = l; actual_fv = ys }, e) -> S.remove x (S.union (S.of_list ys) (fv e))
       
 let toplevel : def list ref = ref []
-  
+
+let rec k env =
+  function
+  | KNormal.PtBool(b) -> PtBool(b)
+  | KNormal.PtInt(n) -> PtInt(n)
+  | KNormal.PtVar(x) -> PtVar(x)
+  | KNormal.PtTuple(ps) -> PtTuple(List.map (k env) ps)
+  | KNormal.PtField(xps) -> PtField(List.map (fun (x, p) -> (x, (k env p))) xps)
+  | KNormal.PtConstr(x, ps) -> PtConstr(x, List.map (k env) ps)
+
 let rec h env known e = 
   let () = D.printf "Closure.h %s\n" (KNormal.ocaml_of_e e) in
   match e with
@@ -111,9 +144,11 @@ let rec h env known e =
   | KNormal.Record(xes) -> Record(List.map (fun (x, e) -> x, h env known e) xes)
   | KNormal.Field(e, x) -> Field(h env known e, x)
   | KNormal.Tuple(es) -> Tuple(List.map (h env known) es)
-  | KNormal.Not(e) -> Not(h env known e)
   | KNormal.Var(x) -> Var(x)
   | KNormal.Constr(x, es) -> Constr(x, List.map (h env known) es)
+  | KNormal.Not(e) -> Not(h env known e)
+  | KNormal.And(e1, e2) -> And(h env known e1, h env known e2)
+  | KNormal.Or(e1, e2) -> Or(h env known e1, h env known e2)
   | KNormal.Neg(e) -> Neg(h env known e)
   | KNormal.Add(e1, e2) -> Add(h env known e1, h env known e2)
   | KNormal.Sub(e1, e2) -> Sub(h env known e1, h env known e2)
@@ -139,6 +174,7 @@ let rec g env known e = (* クロージャ変換ルーチン本体 (caml2html: c
   | KNormal.Exp(e) -> Exp(h env known e)
   | KNormal.Cons(x, y) -> assert false (* not implemented *)
   | KNormal.If(e, e1, e2) -> If(h env known e, g env known e1, g env known e2)
+  | KNormal.MATCH(x, pes) -> MATCH(x, (List.map (fun (p, e) -> (k env p), (g env known e)) pes))
   | KNormal.Let((x, t), e1, e2) -> Let((x, t), g env known e1, g (M.add x t env) known e2)
   | KNormal.LetRec({ KNormal.name = (x, t); KNormal.args = yts; KNormal.body = e1 }, e2) -> (* 関数定義の場合 (caml2html: closure_letrec) *)
       (* 関数定義let rec x y1 ... yn = e1 in e2の場合は、

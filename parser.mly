@@ -3,6 +3,7 @@
 open Syntax
 let addtyp x = (x, Type.Meta(Type.newmetavar ()))
 let constr_args = function Tuple(xs) -> xs | x -> [x]
+let constr_pattern_args = function PtTuple(xs) -> xs | x -> [x]
 %}
 
 /* 字句を表すデータ型の定義 (caml2html: parser_token) */
@@ -15,6 +16,8 @@ let constr_args = function Tuple(xs) -> xs | x -> [x]
 %token AST
 %token SLASH
 %token CONS
+%token LAND
+%token LOR
 %token EQUAL
 %token LESS_GREATER
 %token LESS_EQUAL
@@ -31,6 +34,9 @@ let constr_args = function Tuple(xs) -> xs | x -> [x]
 %token REC
 %token TYPE
 %token OF
+%token MATCH
+%token WITH
+%token RIGHT_ARROW
 %token SEMICOLON
 %token COLON
 %token LPAREN
@@ -47,11 +53,14 @@ let constr_args = function Tuple(xs) -> xs | x -> [x]
 
 /* 優先順位とassociativityの定義（低い方から高い方へ） (caml2html: parser_prior) */
 %right prec_let
+%right prec_match
 %right SEMICOLON
 %right prec_if
 %right LESS_MINUS
 %left COMMA
 %left EQUAL LESS_GREATER LESS GREATER LESS_EQUAL GREATER_EQUAL
+%right LAND
+%right LOR
 %right CONS
 %left PLUS MINUS
 %left AST SLASH
@@ -125,6 +134,10 @@ expr: /* 一般の式 (caml2html: parser_expr) */
     { Div($1, $3) }
 | expr CONS expr
     { Cons($1, $3) }
+| expr LAND expr
+    { And($1, $3) }
+| expr LOR expr
+    { Or($1, $3) }
 | expr EQUAL expr
     { Eq($1, $3) }
 | expr LESS_GREATER expr
@@ -149,6 +162,15 @@ expr: /* 一般の式 (caml2html: parser_expr) */
     { Constr($1, constr_args $2) }
 | LBRACE fields RBRACE
     { Record($2) }
+| LET IDENT EQUAL seq_expr IN seq_expr
+    %prec prec_let
+    { LetVar(addtyp $2, $4, $6) }
+| LET REC fundef IN seq_expr
+    %prec prec_let
+    { LetRec($3, $5) }
+| MATCH expr WITH pattern_matching
+    %prec prec_match
+    { MATCH($2, $4) }
 | error
     { failwith
 	(Printf.sprintf "parse error near characters %d-%d"
@@ -159,12 +181,6 @@ expr: /* 一般の式 (caml2html: parser_expr) */
 seq_expr: 
 | expr
     { $1 }
-| LET IDENT EQUAL seq_expr IN seq_expr
-    %prec prec_let
-    { LetVar(addtyp $2, $4, $6) }
-| LET REC fundef IN seq_expr
-    %prec prec_let
-    { LetRec($3, $5) }
 | expr SEMICOLON seq_expr
     { LetVar((Id.gentmp (Type.prefix (Type.App(Type.Unit, []))), (Type.App(Type.Unit, []))), $1, $3) }
 ;    
@@ -210,6 +226,59 @@ field:
 | IDENT EQUAL expr
     { ($1, $3) }
 ;
+
+pattern_matching:
+| opt_pipe pattern RIGHT_ARROW seq_expr pattern_matching_tail
+    { ($2, $4) :: $5 }
+;
+pattern_matching_tail:
+| /* empty */ 
+    { [] }
+| PIPE pattern_matching
+    { $2 }
+;
+opt_pipe:
+| /* empty */ 
+    {  }
+| PIPE
+    {  }
+;
+pattern:
+| LPAREN pattern RPAREN
+    { $2 }
+| BOOL
+    { PtBool($1) }
+| INT
+    { PtInt($1) }
+| IDENT
+    { PtVar($1) }
+| tuple_pattern
+    { PtTuple(List.rev $1) }
+| LBRACE field_patterns RBRACE
+    { PtField(List.rev $2) }
+| UIDENT pattern
+    { PtConstr($1, constr_pattern_args $2) }
+;
+
+tuple_pattern:
+| tuple_pattern COMMA pattern
+    { $3 :: $1 }
+| pattern COMMA pattern
+    { [$3; $1] }
+;
+
+field_patterns:
+| field_patterns SEMICOLON field_pattern
+    { $3 :: $1 }
+| field_pattern SEMICOLON field_pattern
+    { [$3; $1] }
+;
+
+field_pattern:
+| IDENT EQUAL pattern
+    { ($1, $3) }
+;
+
 typedef:
 | IDENT EQUAL IDENT
     { TypeDef($1, Type.NameTy($3, ref None)) }

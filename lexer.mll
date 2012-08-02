@@ -45,6 +45,10 @@ rule token = parse
     { SLASH }
 | "::"
     { CONS }
+| "&&"
+    { LAND }
+| "||"
+    { LOR }
 | '='
     { EQUAL }
 | "<>"
@@ -73,6 +77,12 @@ rule token = parse
     { TYPE }
 | "of"
     { OF }
+| "match"
+    { MATCH }
+| "with"
+    { WITH }
+| "->"
+    { RIGHT_ARROW }
 | '_'
     { IDENT(Id.gentmp (Type.prefix (Type.App(Type.Unit, [])))) }
 | ':'

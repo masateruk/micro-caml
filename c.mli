@@ -16,6 +16,8 @@ and exp =
   | Struct of Id.t * (Id.t * exp) list
   | Field of exp * Id.t
   | Not of exp
+  | And of exp * exp
+  | Or of exp * exp
   | Neg of exp
   | Add of exp * exp
   | Sub of exp * exp
@@ -47,6 +49,7 @@ type def =
   | EnumDef of Id.t list * bool ref
 type prog = Prog of def list
   
+val string_of_exp : exp -> Id.t
 val enable_gc : bool ref
 val f : Closure.prog -> prog
 

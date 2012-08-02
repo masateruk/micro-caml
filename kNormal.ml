@@ -7,6 +7,7 @@ type t = (* K正規化後の式 (caml2html: knormal_t) *)
   | Exp of e
   | Cons of Id.t * Id.t
   | If of e * t * t 
+  | MATCH of Id.t * (pattern * t) list
   | Let of (Id.t * Type.t) * t * t
   | LetRec of fundef * t
   | WrapBody of Id.t * Type.t
@@ -18,6 +19,8 @@ and e =
   | Field of e * Id.t
   | Tuple of e list
   | Not of e
+  | And of e * e
+  | Or of e * e
   | Neg of e
   | Add of e * e
   | Sub of e * e
@@ -29,11 +32,27 @@ and e =
   | Constr of Id.t * e list
   | App of e * e list
   | ExtFunApp of Id.t * e list
+and pattern =
+  | PtBool of bool
+  | PtInt of int
+  | PtVar of Id.t
+  | PtTuple of pattern list
+  | PtField of (Id.t * pattern) list
+  | PtConstr of Id.t * pattern list
 and fundef = { name : Id.t * Type.t; args : (Id.t * Type.t) list; body : t }
 and def =
   | TypeDef of (Id.t * Type.t)
   | VarDef of (Id.t * Type.t) * t
   | RecDef of fundef
+
+let rec ocaml_of_pattern =
+  function
+  | PtBool(b) -> string_of_bool b
+  | PtInt(n) -> string_of_int n
+  | PtVar(x) -> x
+  | PtTuple(ps) -> String.concat ", " (List.map ocaml_of_pattern ps)
+  | PtField(xps) -> String.concat ", " (List.map (fun (x, p) -> x ^ " = " ^ (ocaml_of_pattern p)) xps)
+  | PtConstr(x, ps) -> x ^ ", " ^ String.concat ", " (List.map ocaml_of_pattern ps)
 
 let rec ocaml_of_e = 
   function
@@ -43,6 +62,8 @@ let rec ocaml_of_e =
   | Field(e, x) -> (ocaml_of_e e) ^ "." ^ x
   | Tuple(es) -> "(" ^ (String.concat ", " (List.map ocaml_of_e es)) ^ ")"
   | Not(e) -> "not " ^ (ocaml_of_e e)
+  | And(e1, e2) -> (ocaml_of_e e1) ^ " && " ^ (ocaml_of_e e2)
+  | Or(e1, e2) -> (ocaml_of_e e1) ^ " || " ^ (ocaml_of_e e2)
   | Neg(e) -> "! " ^ (ocaml_of_e e)
   | Add(e1, e2) -> (ocaml_of_e e1) ^ " + " ^ (ocaml_of_e e2)
   | Sub(e1, e2) -> (ocaml_of_e e1) ^ " - " ^ (ocaml_of_e e2)
@@ -56,12 +77,14 @@ let rec ocaml_of_e =
   | App(e, args) -> "(" ^ (ocaml_of_e e) ^ " " ^ (String.concat " " (List.map ocaml_of_e args)) ^ ")"
   | ExtFunApp(x, args) -> "(" ^ x ^ " " ^ (String.concat " " (List.map ocaml_of_e args)) ^ ")"
     
-let rec ocaml_of_t = function
+let rec ocaml_of_t = 
+  function
   | Unit -> "()"
   | Nil _ -> "[]"
   | Exp(e) -> ocaml_of_e e
   | Cons _ -> assert false
   | If(e, e1, e2) -> "if " ^ (ocaml_of_e e) ^ "\n\tthen " ^ (ocaml_of_t e1) ^ "\n\telse " ^ (ocaml_of_t e2)
+  | MATCH(x, pes) -> "match " ^ x ^ " with\n" ^ (String.concat "\n" (List.map (fun (p, e) -> " | " ^ (ocaml_of_pattern p) ^ " -> " ^ (ocaml_of_t e)) pes))
   | Let((s1, t), e1, e2) -> "\nlet " ^ s1 ^ " : " ^ (Type.ocaml_of  t) ^ " = " ^ (ocaml_of_t e1) ^ " in\n" ^ (ocaml_of_t e2)
   | LetRec({ name = (x, t); args = yts; body = e1 }, e2) -> 
       "\nlet rec " ^ x ^ " " ^ (String.concat " " (List.map (fun (y, t) -> y) yts)) ^ " : " ^ (Type.ocaml_of  t) ^ " =\n"
@@ -80,6 +103,51 @@ let rec insert_let (e, t) k = (* letを挿入する補助関数 (caml2html: knor
       let e', t' = k (Var(x), t) in
       Let((x, t), e, e'), t'
 
+let rec h ((venv, tenv) as env) (p, t) = 
+  match p, t with
+  | Syntax.PtBool(b), _ -> env, (PtBool(b))
+  | Syntax.PtInt(n), _ -> env, (PtInt(n))
+  | Syntax.PtVar(x), t -> ((M.add x t venv), tenv), (PtVar(x))
+  | Syntax.PtTuple(ps), t -> 
+      begin
+        match t with
+        | Type.App(Type.Tuple, ts) -> 
+            let env', ps' = 
+              List.fold_left 
+                (fun (env, ps) (p, t) -> 
+                  let env', p = h env (p, t) in
+                  (env', p :: ps)) 
+                (env, []) (List.combine ps ts) in
+            env', PtTuple(ps')
+        | t -> Printf.eprintf "invalid type : %s\n" (Type.string_of t); assert false
+      end
+  | Syntax.PtField(xps), t -> 
+      begin
+        match t with
+        | Type.App(Type.Record(_, ys), ts) -> 
+            let env', xps' = 
+              List.fold_left 
+                (fun (env, xps) ((x, p), t) -> 
+                  let env', p = h env (p, t) in
+                  (env', (x, p) :: xps)) 
+                (env, []) (List.combine xps ts) in
+            env', PtField(xps')
+        | t -> Printf.eprintf "invalid type : %s\n" (Type.string_of t); assert false
+      end
+  | Syntax.PtConstr(x, ps), t -> 
+      begin
+        match t with
+        | Type.NameTy(_, { contents = Some(Type.App(Type.Variant(_, ytss), [])) }) ->
+            let env', ps' = 
+              List.fold_left 
+                (fun (env, ps) (p, t) -> 
+                  let env', p = h env (p, t) in
+                  (env', p :: ps)) 
+                (env, []) (List.combine ps (snd (List.find (fun (y, _) -> x = y) ytss))) in
+            env', PtConstr(x, ps')
+        | t -> Printf.eprintf "invalid type : %s\n" (Type.string_of t); assert false
+      end
+        
 let rec g env e = (* K正規化ルーチン本体 (caml2html: knormal_g) *)
   let _ = D.printf "kNormal.g %s\n" (Syntax.string_of_exp e) in  
   let venv, tenv = env in
@@ -103,6 +171,8 @@ let rec g env e = (* K正規化ルーチン本体 (caml2html: knormal_g) *)
   | Syntax.Field(e, x) -> let e', t = g env e in insert_let (e', t) (fun (e, _) -> Exp(Field(e, x)), t)
   | Syntax.Tuple(es) -> insert_lets es (fun ets' -> Exp(Tuple(List.map fst ets')), Type.App(Type.Tuple, List.map snd ets'))
   | Syntax.Not(e) -> insert_let (g env e) (fun (e, _) -> Exp(Not(e)), Type.App(Type.Bool, []))
+  | Syntax.And(e1, e2) -> binop e1 e2 (fun e1' e2' -> Exp(And(e1', e2'))) (Type.App(Type.Bool, []))
+  | Syntax.Or(e1, e2) -> binop e1 e2 (fun e1' e2' -> Exp(Or(e1', e2'))) (Type.App(Type.Bool, []))
   | Syntax.Neg(e) -> insert_let (g env e) (fun (e, _) -> Exp(Neg(e)), Type.App(Type.Int, []))
   | Syntax.Add(e1, e2) -> binop e1 e2 (fun e1' e2' -> Exp(Add(e1', e2'))) (Type.App(Type.Int, [])) (* 足し算のK正規化 (caml2html: knormal_add) *)
   | Syntax.Sub(e1, e2) -> binop e1 e2 (fun e1' e2' -> Exp(Sub(e1', e2'))) (Type.App(Type.Int, [])) 
@@ -120,6 +190,24 @@ let rec g env e = (* K正規化ルーチン本体 (caml2html: knormal_g) *)
       let e2', t2 = g env e2 in
       let e3', t3 = g env e3 in
       insert_let (e1', t1) (fun (x, _) -> If(x, e2', e3'), t3)
+  | Syntax.MATCH(Syntax.Var(x), pes) ->
+      let pets = List.map 
+        (fun (p, e) -> 
+          let env', p' = h env (p, (M.find x venv)) in
+          let e', t = g env' e in 
+          (p', e'), t)
+        pes in
+      MATCH(x, List.map fst pets), snd (List.hd pets)
+  | Syntax.MATCH(e, pes) ->
+      let e', t = g env e in
+      let pets = List.map 
+        (fun (p, e) -> 
+          let env', p' = h env (p, t) in
+          let e', t = g env' e in 
+          (p', e'), t)
+        pes in
+      let x = Id.gentmp (Type.prefix t) in
+      Let((x, t), e', (MATCH(x, List.map fst pets))), snd (List.hd pets)
   | Syntax.LetVar((x, t), e1, e2) ->
       let e1', t1 = g env e1 in
       let e2', t2 = g ((M.add x t venv), tenv) e2 in

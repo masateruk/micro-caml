@@ -3,12 +3,14 @@ open C
 let prec = 
   function
   | Nop | Nil _ | Bool _ | Int _ | Struct _ | Var _ 
-  | CallDir _ | MakeClosure _ | Field _  | Sizeof _ | Ref _ | Deref _ | Cast _ -> 7
-  | Not _ | Neg _ -> 6
-  | Mul _ | Div _ -> 5
-  | Add _ | Sub _  -> 4
-  | LE _ -> 3
-  | Eq _ -> 2
+  | CallDir _ | MakeClosure _ | Field _  | Sizeof _ | Ref _ | Deref _ | Cast _ -> 9
+  | Not _ | Neg _ -> 8
+  | Mul _ | Div _ -> 7
+  | Add _ | Sub _  -> 6
+  | LE _ -> 5
+  | Eq _ -> 4
+  | And _ -> 3
+  | Or _ -> 2
   | Cond _ -> 1
   | Comma _ -> 0
   | Cons _ -> assert false
@@ -56,6 +58,8 @@ let rec string_of_exp outer e =
     | Struct(x, xes) -> "(" ^ x ^ "){" ^ (String.concat ", " (List.map (fun (x, e) -> "." ^ x ^ " = " ^ (string_of_exp inner e)) xes)) ^ "}"
     | Field(e, y) -> (string_of_exp inner e) ^ "." ^ y
     | Not(e) -> "!" ^ (string_of_exp inner e)
+    | And(e1, e2) -> (string_of_exp inner e1) ^ " && " ^ (string_of_exp inner e2)
+    | Or(e1, e2) -> (string_of_exp inner e1) ^ " || " ^ (string_of_exp inner e2)
     | Neg(e) -> "-" ^ (string_of_exp inner e)
     | Add(e1, e2) -> (string_of_exp inner e1) ^ " + " ^ (string_of_exp inner e2)
     | Sub(e1, e2) -> (string_of_exp inner e1) ^ " - " ^ (string_of_exp inner e2)

@@ -7,6 +7,7 @@ type t =
   | Exp of e
   | Cons of Id.t * Id.t
   | If of e * t * t
+  | MATCH of Id.t * (pattern * t) list
   | Let of (Id.t * Type.t) * t * t
   | MakeCls of (Id.t * Type.t) * closure * t
 and e = 
@@ -16,6 +17,8 @@ and e =
   | Field of e * Id.t
   | Tuple of e list
   | Not of e
+  | And of e * e
+  | Or of e * e
   | Neg of e
   | Add of e * e
   | Sub of e * e
@@ -27,6 +30,13 @@ and e =
   | Constr of Id.t * e list
   | App of e * e list
   | AppDir of Id.l * e list
+and pattern =
+  | PtBool of bool
+  | PtInt of int
+  | PtVar of Id.t
+  | PtTuple of pattern list
+  | PtField of (Id.t * pattern) list
+  | PtConstr of Id.t * pattern list
 type fundef = {
   name : Id.l * Type.t;
   args : (Id.t * Type.t) list;
@@ -39,6 +49,7 @@ and def =
   | FunDef of fundef
 type prog = Prog of def list
 
+val string_of_pattern : pattern -> string
 val string_of_e : e -> string
 val string_of_exp : t -> string
 val string_of_def : def -> string

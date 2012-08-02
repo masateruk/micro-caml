@@ -4,7 +4,7 @@ open KNormal
 
 let find x ids = try M.find x ids with Not_found -> x
 let genid x ids = if (M.mem x ids) then Id.genid x else x
-let add x y ids = if (M.mem x ids) then ids else (M.add x y ids)
+let add x y ids = M.add x y ids
 let add_list xs ids = List.fold_left (fun ids x -> add x (genid x ids) ids) ids xs
 
 let rec h ids = function
@@ -13,9 +13,11 @@ let rec h ids = function
   | Record(xs) -> Record(List.map (fun (x, e) -> find x ids, (h ids e)) xs)
   | Field(e, x) -> Field(h ids e, find x ids)
   | Tuple(es) -> Tuple(List.map (h ids) es)
-  | Not(e) -> Not(h ids e)
   | Var(x) -> Var(find x ids)
   | Constr(x, es) -> Constr(find x ids, List.map (h ids) es)
+  | Not(e) -> Not(h ids e)
+  | And(e1, e2) -> And(h ids e1, h ids e2)
+  | Or(e1, e2) -> Or(h ids e1, h ids e2)
   | Neg(e) -> Neg(h ids e)
   | Add(e1, e2) -> Add(h ids e1, h ids e2)
   | Sub(e1, e2) -> Sub(h ids e1, h ids e2)
@@ -25,13 +27,45 @@ let rec h ids = function
   | LE(e1, e2) -> LE(h ids e1, h ids e2)
   | App(e, ys) -> App(h ids e, List.map (h ids) ys)
   | ExtFunApp(x, ys) -> ExtFunApp(x, List.map (h ids) ys)
-    
-let rec g ids = function (* α変換ルーチン本体 (caml2html: alpha_g) *)
+
+let rec pattern ids =
+  function
+  | PtBool(b) -> ids, (PtBool(b))
+  | PtInt(n) -> ids, (PtInt(n))
+  | PtVar(x) -> let x' = genid x ids in (add x x' ids), (PtVar(x')) 
+  | PtTuple(ps) -> 
+      let ids', ps' = 
+        List.fold_left 
+          (fun (ids, ps) p -> 
+            let ids', p = pattern ids p in
+            (ids', p :: ps))
+          (ids, []) ps in
+      ids', PtTuple(ps')
+  | PtField(xps) -> 
+      let ids', xps' = 
+        List.fold_left 
+          (fun (ids, xps) (x, p) -> 
+            let ids', p = pattern ids p in
+            (ids', (x, p) :: xps))
+          (ids, []) xps in
+      ids', PtField(xps')
+  | PtConstr(x, ps) -> 
+      let ids', ps' = 
+        List.fold_left 
+          (fun (ids, ps) p -> 
+            let ids', p = pattern ids p in
+            (ids', p :: ps))
+          (ids, []) ps in
+      ids', PtConstr(x, ps')
+
+let rec g ids = (* α変換ルーチン本体 (caml2html: alpha_g) *)
+  function 
   | Unit -> Unit
   | Nil(t) -> Nil(t)
   | Exp(e) -> Exp(h ids e)
   | Cons(x, y) -> Cons(find x ids, find y ids)
   | If(e, e1, e2) -> If(h ids e, g ids e1, g ids e2)
+  | MATCH(x, pes) -> MATCH(x, List.map (fun (p, e) -> let ids', p' = pattern ids p in p', g ids' e) pes)
   | Let((x, t), e1, e2) -> (* letのα変換 (caml2html: alpha_let) *)
       let x' = genid x ids in
       Let((x', t), g ids e1, g (add x x' ids) e2)

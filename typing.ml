@@ -175,6 +175,8 @@ let rec deref_id_typ tenv (x, t) = (x, deref_typ tenv t)
 let rec deref_term tenv = 
   function
   | Not(e) -> Not(deref_term tenv e)
+  | And(e1, e2) -> And(deref_term tenv e1, deref_term tenv e2)
+  | Or(e1, e2) -> Or(deref_term tenv e1, deref_term tenv e2)
   | Neg(e) -> Neg(deref_term tenv e)
   | Add(e1, e2) -> Add(deref_term tenv e1, deref_term tenv e2)
   | Sub(e1, e2) -> Sub(deref_term tenv e1, deref_term tenv e2)
@@ -192,10 +194,37 @@ let rec deref_term tenv =
              deref_term tenv e2)
   | App(e, es) -> App(deref_term tenv e, List.map (deref_term tenv) es)
   | e -> e
+
+let rec pattern ((venv, tenv) as env) (p, t) =
+  let _ = D.printf "Typing.pattern (%s, %s)\n" (string_of_pattern p) (Type.string_of t) in
+  match p with
+  | PtBool(b) -> unify tenv t (Type.App(Type.Bool, [])); env
+  | PtInt(n) -> unify tenv t (Type.App(Type.Int, [])); env
+  | PtVar(x) -> (M.add x t venv, tenv)
+  | PtTuple(ps) -> 
+      begin
+        match t with
+        | Type.App(Type.Tuple, ts) -> List.fold_left (fun env' (p, t) -> pattern env' (p, t)) env (List.combine ps ts)
+        | t -> Printf.eprintf "invalid type : %s\n" (Type.string_of t); assert false
+      end
+  | PtField(xps) -> 
+      begin
+        match t with
+        | Type.App(Type.Record _, ts) -> List.fold_left (fun env' ((_, p), t) -> pattern env' (p, t)) env (List.combine xps ts)
+        | t -> Printf.eprintf "invalid type : %s\n" (Type.string_of t); assert false
+      end
+  | PtConstr(x, ps) -> 
+      begin
+        match t with
+        | Type.App(Type.Variant(_, ytss), []) -> 
+            let _, ts = List.find (fun (y, _) -> x = y) ytss in
+            List.fold_left (fun env' (p, t) -> pattern env' (p, t)) env (List.combine ps ts)
+        | t -> Printf.eprintf "invalid type : %s\n" (Type.string_of t); assert false
+      end
       
 let rec g env e = (* 型推論ルーチン (caml2html: typing_g) *)
   let venv, tenv = env in
-  let _ = D.printf "Typing.g %s!\n" (string_of_exp e) in
+  let _ = D.printf "Typing.g %s\n" (string_of_exp e) in
   try
     match e with
     | Unit -> Type.App(Type.Unit, [])
@@ -225,6 +254,10 @@ let rec g env e = (* 型推論ルーチン (caml2html: typing_g) *)
     | Not(e) ->
         unify tenv (Type.App(Type.Bool, [])) (g env e);
         Type.App(Type.Bool, [])
+    | And(e1, e2) | Or(e1, e2) ->
+        unify tenv (Type.App(Type.Bool, [])) (g env e1);
+        unify tenv (Type.App(Type.Bool, [])) (g env e2);
+        Type.App(Type.Bool, [])
     | Neg(e) ->
         unify tenv (Type.App(Type.Int, [])) (g env e);
         Type.App(Type.Int, [])
@@ -252,6 +285,12 @@ let rec g env e = (* 型推論ルーチン (caml2html: typing_g) *)
         let t3 = g env e3 in
         unify tenv t2 t3;
         t2
+    | MATCH(e, pes) ->
+        let t = g env e in
+        let ts = List.map (fun (p, e) -> g (pattern env (p, t)) e) pes in
+        let t' = List.hd ts in
+        List.iter (unify tenv t') (List.tl ts);
+        t'
     | LetVar((x, t), e1, e2) -> (* letの型推論 (caml2html: typing_let) *)
         let t1 = g env e1 in
         let t1' = generalize env t1 in (* 副作用は未サポートなので、Tiger本のp.335にある代入の判定はなし *)

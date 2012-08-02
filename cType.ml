@@ -48,12 +48,13 @@ let rec equal t1 t2 =
 let rec prefix = 
   function
   | Void -> assert false
+  | NameTy(x, t') -> x
   | Int -> "n"
   | Bool -> "b"
   | Enum _ -> "e"
   | Fun _ -> "pfn"
-  | Struct _ -> "st"
+  | Struct("", _) -> "st"
+  | Struct(x,  _) -> x
   | Union _ -> "u"
-  | NameTy(x, t') -> x
   | Box -> "v" 
   | Pointer _ -> assert false

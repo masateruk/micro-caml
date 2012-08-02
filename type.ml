@@ -55,10 +55,11 @@ and string_of_tycon =
 let rec prefix = 
   function
   | Var _ -> "v" 
+  | Field(_, t) -> prefix t
   | App(tycon, _) -> prefix_of_tycon tycon
   | Poly(_, t) -> prefix t
   | NameTy(_, { contents = Some(t) }) -> prefix t
-  | _ -> assert false
+  | t -> D.printf "t = %s\n" (string_of t); assert false
       
 and prefix_of_tycon = 
   function
@@ -74,6 +75,7 @@ and prefix_of_tycon =
 let rec ocaml_of = 
   function
   | Var _ -> "'a"
+  | Field(_, t) -> ocaml_of t
   | App(Unit, []) -> "()"
   | App(Bool, []) -> "bool"
   | App(Int, []) -> "int"

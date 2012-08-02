@@ -136,8 +136,7 @@ and unwrap (e, s) t =
       App(Var(unwrapper t), [e])
   | s, t when s = t -> e
   | _ -> Printf.eprintf "not implemented.\n"; assert false
-    
-    
+ 
 let subst_map s t =
   let _ = D.printf "Wrap.subst_map %s %s\n" (Type.string_of s) (Type.string_of t) in
   let rec loop s t xs =
@@ -151,6 +150,32 @@ let subst_map s t =
     | s, t -> xs in (* Printf.eprintf "invalid type : s = %s\n  t = %s\n" (Type.string_of_typ s) (Type.string_of_typ t); assert false in *)
   loop s t []
     
+let rec pattern ((venv, tenv) as env) (p, t) =
+  match p with
+  | PtBool(b) -> env
+  | PtInt(n) -> env
+  | PtVar(x) -> (M.add x t venv, tenv)
+  | PtTuple(ps) -> 
+      begin
+        match t with
+        | Type.App(Type.Tuple, ts) -> List.fold_left (fun env' (p, t) -> pattern env' (p, t)) env (List.combine ps ts)
+        | t -> Printf.eprintf "invalid type : %s\n" (Type.string_of t); assert false
+      end
+  | PtField(xps) -> 
+      begin
+        match t with
+        | Type.App(Type.Record _, ts) -> List.fold_left (fun env' ((_, p), t) -> pattern env' (p, t)) env (List.combine xps ts)
+        | t -> Printf.eprintf "invalid type : %s\n" (Type.string_of t); assert false
+      end
+  | PtConstr(x, ps) -> 
+      begin
+        match t with
+        | Type.NameTy(_, { contents = Some(Type.App(Type.Variant(_, ytss), [])) }) -> 
+            let _, ts = List.find (fun (y, _) -> x = y) ytss in
+            List.fold_left (fun env' (p, t) -> pattern env' (p, t)) env (List.combine ps ts)
+        | t -> Printf.eprintf "invalid type : %s\n" (Type.string_of t); assert false
+      end
+
 let rec g env e =
   let _ = D.printf "Wrap.g %s\n" (string_of_exp e) in
   let venv, tenv = env in
@@ -166,6 +191,14 @@ let rec g env e =
       let ets' = List.map (g env) es in
       Tuple(List.map fst ets'), Type.App(Type.Tuple, List.map snd ets')
   | Not(e) -> let e', _ = g env e in Not(e'), Type.App(Type.Bool, [])
+  | And(e1, e2) -> 
+      let e1', _ = g env e1 in
+      let e2', _ = g env e2 in
+      And(e1', e2'), Type.App(Type.Bool, [])
+  | Or(e1, e2) -> 
+      let e1', _ = g env e1 in
+      let e2', _ = g env e2 in
+      Or(e1', e2'), Type.App(Type.Bool, [])
   | Neg(e) -> let e', _ = g env e in Neg(e'), Type.App(Type.Int, [])
   | Add(e1, e2) -> 
       let e1', _ = g env e1 in
@@ -196,6 +229,13 @@ let rec g env e =
       let e2', t2 = g env e2 in
       let e3', _ = g env e3 in
       If(e1', e2', e3'), t2
+  | MATCH(e, pes) -> 
+      let e', t' = g env e in
+      let pets = List.map 
+        (fun (p, e) -> 
+          let e', t = g (pattern env (p, t')) e in
+          (p, e'), t) pes in
+      MATCH(e', List.map fst pets), snd (List.hd pets)
   | LetVar((x, t), e1, e2) -> 
       let e1', _ = g env e1 in
       let e2', t2 = g ((M.add x t venv), tenv) e2 in

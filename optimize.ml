@@ -63,7 +63,6 @@ let mark_id defs x =
   List.iter (function FunDef({ name = Id.L(x'); _ }, b) when x' = x -> b := true | _ -> ()) defs
 
 let rec mark_ty defs t =
-  let _ = D.printf "Optimaize.mark_ty %s\n" (CType.string_of t) in
   List.iter 
     (fun def -> 
       match t, def with 
@@ -88,6 +87,7 @@ let rec mark_exp defs =
   | Struct(_, xes) -> List.iter (fun (x, e) -> mark_exp defs e) xes
   | Field(e, y) -> mark_exp defs e; mark_id defs y
   | Not(e) | Neg(e) -> mark_exp defs e
+  | And(e1, e2) | Or(e1, e2)
   | Add(e1, e2) | Sub(e1, e2) | Mul(e1, e2) | Div(e1, e2) | Eq(e1, e2) | LE(e1, e2) -> mark_exp defs e1; mark_exp defs e2
   | Cons(x, y) -> mark_id defs x; mark_id defs y
   | Var(x) -> mark_id defs x
@@ -122,13 +122,79 @@ let rec mark defs =
   | EnumDef(xs, b) -> b := true (* EnumDef は int で参照されるため強制的に使用していることにする *)
   | def -> ()
 
+(* trueとの論理積, falseとの論理和を削除 *)
+let rec simplify_expr =
+  function
+  | Int _ | Bool _ | Nil _ | Nop | Cons _ | Var _ | MakeClosure _ | Sizeof _ | Comma as e -> e
+  | Struct(x, yes) -> Struct(x, List.map (fun (y, e) -> (y, simplify_expr e)) yes)
+  | Field(e, x) -> Field(simplify_expr e, x)
+  | Not(e) -> Not(simplify_expr e)
+  | And(e1, e2) -> 
+      begin 
+        match (simplify_expr e1), (simplify_expr e2) with
+        | Bool(true), e 
+        | e, Bool(true) -> e
+        | e1', e2' -> And(e1', e2')
+      end
+  | Or(e1, e2) -> 
+      begin 
+        match (simplify_expr e1), (simplify_expr e2) with
+        | Bool(false), e -> simplify_expr e
+        | e, Bool(false) -> simplify_expr e
+        | e1', e2' -> Or(e1', e2')
+      end
+  | Neg(e) -> Neg(simplify_expr e)
+  | Add(e1, e2) -> Add(simplify_expr e1, simplify_expr e2)
+  | Sub(e1, e2) -> Sub(simplify_expr e1, simplify_expr e2)
+  | Mul(e1, e2) -> Mul(simplify_expr e1, simplify_expr e2)
+  | Div(e1, e2) -> Div(simplify_expr e1, simplify_expr e2)
+  | Eq(e1, e2) -> Eq(simplify_expr e1, simplify_expr e2)
+  | LE(e1, e2) -> LE(simplify_expr e1, simplify_expr e2)
+  | Cond(e, e1, e2) -> Cond(simplify_expr e, simplify_expr e1, simplify_expr e2)
+  | CallDir(e, es) -> CallDir(simplify_expr e, List.map simplify_expr es)
+  | Let(xt, e1, e2)  -> Let(xt, simplify_expr e1, simplify_expr e2)
+  | Ref(e) -> Ref(simplify_expr e)
+  | Deref(e) -> Deref(simplify_expr e)
+  | Cast(t, e) -> Cast(t, simplify_expr e)
+
+let _ = 
+  assert ((simplify_expr (And(Bool(true), Var("x")))) = (Var("x")));
+  assert ((simplify_expr (And(Bool(true), (And(Bool(true), Var("x")))))) = (Var("x")));
+  assert ((simplify_expr (And((And(Bool(true), Var("x"))), (Bool(true))))) = (Var("x")))
+
+(* if文の条件式がtrueまたはfalseの場合はifを削除 *)
+let rec simplify_s =
+  function
+  | Dec(xt, None) -> Dec(xt, None)
+  | Dec(xt, Some(e)) -> Dec(xt, Some(simplify_expr e))
+  | Assign(x, e) -> Assign(simplify_expr x, simplify_expr e)
+  | Exp(e) -> Exp(simplify_expr e)
+  | If(e, s1, s2) -> 
+      begin 
+        match simplify_expr e with
+        | Bool(true) -> simplify_s s1
+        | Bool(false) -> simplify_s s2
+        | e -> If(e, simplify_s s1, simplify_s s2)
+      end
+  | Return(e) -> Return(simplify_expr e)
+  | Seq(s1, s2) -> 
+      begin
+        match (simplify_s s1), (simplify_s s2) with
+        | Exp(Nop), s 
+        | s, Exp(Nop) -> s
+        | s1, s2 -> Seq(s1, s2)
+      end
+  | Block(decs, s) -> Block(decs, simplify_s s)
+
+
 let g = 
   function
   | FunDef({ name = Id.L(x); args = yts; body = s; ret = t }, b) ->
-      FunDef({ name = Id.L(x);  args = yts; body = reduce_addref s; ret = t }, b)
+      FunDef({ name = Id.L(x);  args = yts; body = simplify_s (reduce_addref s); ret = t }, b) 
   | def -> def
 	      
 let f (Prog(defs)) = 
+  let _ = D.printf "Optimize.f \n" in
   let defs' = List.map g defs in
     List.iter (mark defs') defs';
     Prog(defs')
