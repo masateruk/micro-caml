@@ -256,6 +256,8 @@ pattern:
     { PtTuple(List.rev $1) }
 | LBRACE field_patterns RBRACE
     { PtField(List.rev $2) }
+| UIDENT 
+    { PtConstr($1, []) }
 | UIDENT pattern
     { PtConstr($1, constr_pattern_args $2) }
 ;

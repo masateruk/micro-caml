@@ -16,7 +16,7 @@ let prec =
   | Cons _ -> assert false
   | Let _ -> assert false
   
-let indent depth = String.make (depth * 2) ' '
+let indent depth = String.make (depth * 4) ' '
   
 let rec string_of_type ?(depth = 0) ?(tags = []) = 
   function
@@ -80,42 +80,49 @@ let rec string_of_exp outer e =
     | Comma -> assert false in
     if (inner < outer) then "(" ^ s ^ ")" else s
     
-let rec string_of_separator = 
+let string_of_exp = string_of_exp (-1)
+
+let rec separator = 
   function
   | If _ -> ""
-  | Seq(_, s) -> string_of_separator s
+  | Seq(_, s) -> separator s
   | Block _ -> ""
   | _ -> ";"
       
 let rec string_of_prog (Prog(defs)) =
-  let rec string_of_statement depth = 
-    function
-    | Dec((x, t), None) -> (indent depth) ^ (string_of_id x t)
-    | Dec((x, t), Some(e)) -> (indent depth) ^ (string_of_id x t) ^ " = " ^ (string_of_exp (-1) e)
-    | Assign(x, e) -> (indent depth) ^ (string_of_exp (-1) x) ^ " = " ^ (string_of_exp (-1) e)
-    | Exp(e) -> (indent depth) ^ (string_of_exp (-1) e) 
-    | If(e, s1, s2) -> (indent depth) ^ "if (" ^ (string_of_exp (-1) e) ^ ") " ^ (string_of_statement depth s1) ^ " else " ^ (string_of_statement depth s2)
-    | Return(e) -> (indent depth) ^ "return " ^ (string_of_exp (-1) e)
-    | Seq(s1, s2) -> (string_of_statement depth s1) ^ (string_of_separator s1) ^ "\n" ^ (string_of_statement depth s2) 
-    | Block([], s) -> "{\n" ^ (string_of_statement (depth + 1) s) ^ ";\n" ^ (indent depth) ^ "}" 
-    | Block(decs, s) -> "{\n" ^ (String.concat ";\n" (List.map (string_of_dec (depth + 1)) decs)) ^ ";\n\n" ^ (string_of_statement (depth + 1) s) ^ ";\n" ^ (indent depth) ^ "}" 
+  let rec string_of_statement header_depth inner_depth s =
+    let padding = indent header_depth in
+    let and_statement = string_of_statement 0 inner_depth in
+    let and_padding = indent inner_depth in
+    let newline_statement = string_of_statement (inner_depth + 1) (inner_depth + 1) in
+    match s with
+    | Dec((x, t), None) -> padding ^ (string_of_id x t)
+    | Dec((x, t), Some(e)) -> padding ^ (string_of_id x t) ^ " = " ^ (string_of_exp e)
+    | Assign(x, e) -> padding ^ (string_of_exp x) ^ " = " ^ (string_of_exp e)
+    | Exp(e) -> padding ^ (string_of_exp e) 
+    | If(e, s1, s2) -> padding ^ "if (" ^ (string_of_exp e) ^ ") " ^ (and_statement s1) ^ " else " ^ (and_statement s2)
+    | Return(e) -> padding ^ "return " ^ (string_of_exp e)
+    | Seq(s1, s2) -> (string_of_statement header_depth inner_depth s1) ^ (separator s1) ^ "\n" ^ (string_of_statement inner_depth inner_depth s2) 
+    | Block([], s) -> padding ^ "{\n" ^ (newline_statement s) ^ ";\n" ^ and_padding ^ "}" 
+    | Block(decs, s) -> padding ^ "{\n" ^ (String.concat ";\n" (List.map (string_of_dec (inner_depth + 1)) decs)) ^ ";\n\n" ^ (newline_statement s) ^ ";\n" ^ and_padding ^ "}" 
   and string_of_dec depth = 
     function
     | VarDec((x, t), None) -> (indent depth) ^ (string_of_id x t)
-    | VarDec((x, t), Some(e)) -> (indent depth) ^ (string_of_id x t) ^ " = " ^ (string_of_exp (-1) e) in
+    | VarDec((x, t), Some(e)) -> (indent depth) ^ (string_of_id x t) ^ " = " ^ (string_of_exp e) in
   let string_of_def = 
+    let string_of_statement = string_of_statement 0 0 in
     function
     | FunDef({ name = Id.L(x); args = yts; body = s; ret = t }, used) when !used ->
         let t' = string_of_type t in
         let name' = x in
         let args' = String.concat ", " (List.map (fun (y, t) -> (string_of_id y t)) yts) in
-        let body' = string_of_statement 0 s in
+        let body' = string_of_statement s in
           t' ^ " " ^ name' ^ "(" ^ args' ^ ")\n" ^ body' ^ "\n\n"
     | TypeDef((x, t), used) when !used ->
         "typedef " ^ (string_of_id x t) ^ ";\n\n" 
     | VarDef((x, t), e) -> 
         (match e with Exp _ -> () | _ -> assert false);
-        (string_of_id x t) ^ " = " ^ (string_of_statement 0 e) ^ ";\n\n" 
+        (string_of_id x t) ^ " = " ^ (string_of_statement e) ^ ";\n\n" 
     | EnumDef(xs, used) when !used ->
         "enum {\n" ^ 
           (String.concat ",\n" (List.map (fun x -> (indent 1) ^ x) xs)) ^ "\n" ^ 

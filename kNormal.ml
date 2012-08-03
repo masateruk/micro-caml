@@ -134,6 +134,7 @@ let rec h ((venv, tenv) as env) (p, t) =
             env', PtField(xps')
         | t -> Printf.eprintf "invalid type : %s\n" (Type.string_of t); assert false
       end
+  | Syntax.PtConstr(x, []), t -> ((M.add x t venv), tenv), (PtConstr(x, []))
   | Syntax.PtConstr(x, ps), t -> 
       begin
         match t with

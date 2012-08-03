@@ -213,6 +213,7 @@ let rec pattern ((venv, tenv) as env) (p, t) =
         | Type.App(Type.Record _, ts) -> List.fold_left (fun env' ((_, p), t) -> pattern env' (p, t)) env (List.combine xps ts)
         | t -> Printf.eprintf "invalid type : %s\n" (Type.string_of t); assert false
       end
+  | PtConstr(x, []) -> (M.add x t venv, tenv)
   | PtConstr(x, ps) -> 
       begin
         match t with

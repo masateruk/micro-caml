@@ -65,7 +65,7 @@ let rec g ids = (* α変換ルーチン本体 (caml2html: alpha_g) *)
   | Exp(e) -> Exp(h ids e)
   | Cons(x, y) -> Cons(find x ids, find y ids)
   | If(e, e1, e2) -> If(h ids e, g ids e1, g ids e2)
-  | MATCH(x, pes) -> MATCH(x, List.map (fun (p, e) -> let ids', p' = pattern ids p in p', g ids' e) pes)
+  | MATCH(x, pes) -> MATCH(find x ids, List.map (fun (p, e) -> let ids', p' = pattern ids p in p', g ids' e) pes)
   | Let((x, t), e1, e2) -> (* letのα変換 (caml2html: alpha_let) *)
       let x' = genid x ids in
       Let((x', t), g ids e1, g (add x x' ids) e2)

@@ -4,6 +4,6 @@ let () =
   let a = 1 in
   let b = true in
   let c = 1, false, { x = 10; y = 25 } in
-  let e = a, b, c in
   let d = id c in
+  let e = a, b, c in
   print_int 0

@@ -60,7 +60,13 @@ and reduce_release_of_list e = function
       end
 
 let mark_id defs x =
-  List.iter (function FunDef({ name = Id.L(x'); _ }, b) when x' = x -> b := true | _ -> ()) defs
+  List.iter 
+    (function 
+    | FunDef({ name = Id.L(x'); _ }, b) when x' = x -> b := true 
+    | TypeDef((_, CType.Enum(_, xs)), b) when List.mem x xs -> b := true 
+    | EnumDef(xs, b) when List.mem x xs -> b := true 
+    | _ -> ()) 
+    defs
 
 let rec mark_ty defs t =
   List.iter 

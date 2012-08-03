@@ -207,49 +207,22 @@ let wrap_body x t =
 let unwrap_body x t = 
   (Exp(Deref(Cast(CType.Pointer(t), CallDir(Var("sp_get"), [Var(x)])))))
 
-let rec wrapper (x, t) =
-  match t with
-  | CType.Fun(args, r) ->
-      assert(List.length args = 1);
-      let t = List.hd args in
-      let y = gentmp t in
-      FunDef({ name = Id.L(x);
-               args = [(y, t)];
-               body = block (insert_return CType.Box (Seq(Dec(("p", CType.Box), None), 
-                                                          Seq(Assign(Var("p"), CallDir(Var("new_sp"), [Sizeof(t)])),
-                                                              Seq(Assign(Deref(Cast(CType.Pointer(t), CallDir(Var("sp_get"), [Var("p")]))), Var(y)),
-                                                                  Exp(Var("p")))))));
-               ret = r },
-             ref false)
-  | CType.NameTy(_, { contents = Some(t) }) -> wrapper (x, t)
-  | t -> D.printf "invalid type : %s\n" (string_of_type t); assert false
-    
-let rec unwrapper (x, t) =
-  match t with
-  | CType.Fun(args, r) ->
-      assert(List.length args = 1);
-      let t = List.hd args in
-      let y = gentmp t in
-      FunDef({ name = Id.L(x);
-               args = [(y, t)];
-               body = block (insert_return r (Exp(Deref(Cast(CType.Pointer(r), CallDir(Var("sp_get"), [Var(y)]))))));
-               ret = r }, 
-             ref false)
-  | CType.NameTy(_, { contents = Some(t) }) -> unwrapper (x, t)
-  | t -> failwith ("invalid type : " ^ (string_of_type t))
-
-let rec concat s1 xt s2 = 
-  let _ = D.printf "C.concat s1 = %s\n" (string_of_statement 0 s1) in
-  match s1 with
-  | Exp(exp) -> 
-      (match xt with
-      | x, CType.Void -> Seq(s1, s2)
-      | xt -> Seq(Dec(xt, Some(exp)), s2))
-  | Seq(s1', s2') -> Seq(s1', concat s2' xt s2)
-  | _ -> raise (Concat(s1))
+let rec concat s1 (x, t) s2 = 
+  let _ = D.printf "C.concat x = %s, t = %s, s1 = %s\n" x (CType.string_of t) (string_of_statement 0 s1) in
+  match t with  
+  | CType.Void -> Seq(s1, s2)
+  | t -> 
+      begin
+        match s1 with
+        | Exp(exp) -> Seq(Dec((x, t), Some(exp)), s2)
+        | Seq(s1', s2') -> Seq(s1', concat s2' (x, t) s2)
+        | _ -> raise (Concat(s1))
+      end
       
 let toplevel : def list ref = ref []
-  
+
+let failure = CallDir(Var("assert"), [Bool(false)])
+
 let maker_name t = "_make" ^ (string_of_type t)
 let make_closure t = 
   let name = maker_name t in
@@ -377,6 +350,7 @@ let rec insert_dec (e, t) k =
 (* 文で値を返すために戻り値に代入する文を挿入する *)
 let rec insert_assign e s = 
   match s with
+  | Exp(exp) when exp = failure -> s
   | Exp(exp) -> Assign(e, exp)
   | If(pred, s1, s2) -> If(pred, insert_assign e s1, insert_assign e s2)
   | Seq(s1, s2) -> Seq(s1, insert_assign e s2)
@@ -434,6 +408,7 @@ let rec pattern env (e, t) p =
               (List.combine (List.map (fun (x, t) -> Field(e, x), t) xts) (List.map snd xps))
         | t -> D.printf "invalid type : %s\n" (string_of_type t); assert false
       end
+  | Closure.PtConstr(x, []) -> env, (Eq(e, Var(Id.to_upper x))), (Exp(Nop))
   | Closure.PtConstr(x, ps) -> 
       begin
         match t with
@@ -567,17 +542,13 @@ let rec g env ids e = (* C言語の文生成 (caml2html: c_g) *)
         (List.fold_right
            (fun (p, e) (s, t) -> 
              let env', pred, dec = pattern env (Var(x), (M.find x venv)) p in
-             let _ = D.printf "pred = %s\n" (string_of_exp pred) in
-             let _ = D.printf "dec = %s\n" (string_of_statement 0 dec) in
              let s', t' = g env' ids e in
              (If(pred, (Seq(dec, s')), s), t'))
-           pes (block (Exp(CallDir(Var("assert"), [Bool(false)]))), CType.Void))
+           pes ((Exp(failure)), CType.Void))
   | Closure.Let((x, t), e1, e2) -> 
       let x = rename ids x in
       let s1, t1 = g env ids e1 in
       let s2, t2 = g ((M.add x t1 venv), tenv) ids e2 in
-      let _ = D.printf "s1 = %s\n" (string_of_statement 0 s1) in
-      let _ = D.printf "s2 = %s\n" (string_of_statement 0 s2) in
       (concat s1 (x, t1) s2), t2
   | Closure.MakeCls((x, _), { Closure.entry = Id.L(l); Closure.actual_fv = ys }, e2) -> (* クロージャの生成 (caml2html: c_makecls) *)
       let ys = List.map (rename ids) ys in
