@@ -7,7 +7,7 @@ type t =
   | Exp of e
   | Cons of Id.t * Id.t
   | If of e * t * t
-  | MATCH of Id.t * (pattern * t) list
+  | Match of Id.t * (pattern * t) list
   | Let of (Id.t * Type.t) * t * t
   | MakeCls of (Id.t * Type.t) * closure * t
 and e = 
@@ -33,7 +33,7 @@ and e =
 and pattern =
   | PtBool of bool
   | PtInt of int
-  | PtVar of Id.t
+  | PtVar of Id.t * Type.t
   | PtTuple of pattern list
   | PtField of (Id.t * pattern) list
   | PtConstr of Id.t * pattern list
@@ -44,7 +44,7 @@ type fundef = {
   body : t;
 }
 and def =
-  | TypeDef of Id.t * Type.t
+  | TypeDef of Id.t * Type.tycon
   | VarDef of (Id.t * Type.t) * t
   | FunDef of fundef
 type prog = Prog of def list

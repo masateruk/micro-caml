@@ -4,6 +4,7 @@ open Syntax
 let addtyp x = (x, Type.Meta(Type.newmetavar ()))
 let constr_args = function Tuple(xs) -> xs | x -> [x]
 let constr_pattern_args = function PtTuple(xs) -> xs | x -> [x]
+
 %}
 
 /* 字句を表すデータ型の定義 (caml2html: parser_token) */
@@ -41,6 +42,8 @@ let constr_pattern_args = function PtTuple(xs) -> xs | x -> [x]
 %token COLON
 %token LPAREN
 %token RPAREN
+%token BEGIN
+%token END
 %token LBRACE
 %token RBRACE
 %token LSQUARE_BRANKET
@@ -48,6 +51,7 @@ let constr_pattern_args = function PtTuple(xs) -> xs | x -> [x]
 %token DOT
 %token COMMA
 %token PIPE
+%token QUATE
 %token AST
 %token EOF
 
@@ -98,9 +102,15 @@ definition:
 simple_expr: /* 括弧をつけなくても関数の引数になれる式 (caml2html: parser_simple) */
 | LPAREN expr RPAREN
     { $2 }
+| BEGIN expr END
+    { $2 }
 | LPAREN seq_expr RPAREN
     { $2 }
+| BEGIN seq_expr END
+    { $2 }
 | LPAREN RPAREN
+    { Unit }
+| BEGIN END
     { Unit }
 | BOOL
     { Bool($1) }
@@ -170,7 +180,7 @@ expr: /* 一般の式 (caml2html: parser_expr) */
     { LetRec($3, $5) }
 | MATCH expr WITH pattern_matching
     %prec prec_match
-    { MATCH($2, $4) }
+    { Match($2, $4) }
 | error
     { failwith
 	(Printf.sprintf "parse error near characters %d-%d"
@@ -246,12 +256,14 @@ opt_pipe:
 pattern:
 | LPAREN pattern RPAREN
     { $2 }
+| BEGIN pattern END
+    { $2 }
 | BOOL
     { PtBool($1) }
 | INT
     { PtInt($1) }
 | IDENT
-    { PtVar($1) }
+    { PtVar($1, Type.Meta(Type.newmetavar ())) }
 | tuple_pattern
     { PtTuple(List.rev $1) }
 | LBRACE field_patterns RBRACE
@@ -282,16 +294,36 @@ field_pattern:
 ;
 
 typedef:
-| IDENT EQUAL IDENT
-    { TypeDef($1, Type.NameTy($3, ref None)) }
-| IDENT EQUAL LBRACE field_decls RBRACE
-    { TypeDef($1, Type.App(Type.Record($1, List.map fst $4), List.map snd $4)) }
-| IDENT EQUAL variant_decls
-    { TypeDef($1, Type.App(Type.Variant($1, $3), [])) }
+| type_params IDENT EQUAL IDENT
+    { TypeDef($2, Type.TyFun($1, (Type.App(Type.NameTycon($4, ref None), [])))) }
+| type_params IDENT EQUAL LBRACE field_decls RBRACE
+    { TypeDef($2, Type.TyFun($1, (Type.App(Type.Record($2, List.map fst $5), List.map snd $5)))) }
+| type_params IDENT EQUAL variant_decls
+    { TypeDef($2, Type.TyFun($1, (Type.Variant($2, $4)))) }
+;
+type_params:
+| /* empty */
+    { [] }
+| type_param type_params_tail
+    { $1 :: $2 }
+;
+type_param:
+| QUATE IDENT
+    { $2 }
+;
+type_params_tail:
+| /* empty */
+    { [] }
+| COMMA type_param type_params_tail
+    { $2 :: $3 }
 ;
 type_expr:
 | IDENT
-    { Type.NameTy($1, ref None) }
+    { Type.App(Type.NameTycon($1, ref None), []) }
+| QUATE IDENT
+    { Type.Var($2) }
+| type_expr IDENT
+    { Type.App(Type.NameTycon($2, ref None), [$1]) }
 ;
 field_decls:
 | field_decl field_decls_tail
@@ -304,8 +336,8 @@ field_decls_tail:
     { $2 :: $3 }
 ;
 field_decl:
-| IDENT COLON IDENT
-    { ($1, Type.NameTy($3, ref None)) }
+| IDENT COLON type_expr
+    { ($1, $3) }
 ;
 variant_decls:
 | variant_decl variant_decls_tail

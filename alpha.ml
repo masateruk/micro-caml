@@ -32,7 +32,7 @@ let rec pattern ids =
   function
   | PtBool(b) -> ids, (PtBool(b))
   | PtInt(n) -> ids, (PtInt(n))
-  | PtVar(x) -> let x' = genid x ids in (add x x' ids), (PtVar(x')) 
+  | PtVar(x, t) -> let x' = genid x ids in (add x x' ids), (PtVar(x', t)) 
   | PtTuple(ps) -> 
       let ids', ps' = 
         List.fold_left 
@@ -65,7 +65,7 @@ let rec g ids = (* α変換ルーチン本体 (caml2html: alpha_g) *)
   | Exp(e) -> Exp(h ids e)
   | Cons(x, y) -> Cons(find x ids, find y ids)
   | If(e, e1, e2) -> If(h ids e, g ids e1, g ids e2)
-  | MATCH(x, pes) -> MATCH(find x ids, List.map (fun (p, e) -> let ids', p' = pattern ids p in p', g ids' e) pes)
+  | Match(x, pes) -> Match(find x ids, List.map (fun (p, e) -> let ids', p' = pattern ids p in p', g ids' e) pes)
   | Let((x, t), e1, e2) -> (* letのα変換 (caml2html: alpha_let) *)
       let x' = genid x ids in
       Let((x', t), g ids e1, g (add x x' ids) e2)
@@ -84,7 +84,7 @@ let f =
   let f' (ids, defs) =
     function
     | TypeDef(x, t) -> 
-        (add_list (List.map fst (Type.ids t)) ids),  TypeDef(x, t) :: defs
+        (add_list (x :: (List.map fst (Type.tycons t))) ids),  TypeDef(x, t) :: defs
     | VarDef((x, t), e) -> 
         (add x (genid x ids) ids), VarDef((x, t), g ids e) :: defs
     | RecDef({ name = (x, t); args = yts; body = e1 }) -> 

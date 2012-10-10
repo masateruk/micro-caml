@@ -18,7 +18,7 @@ type t = (* uCamlの構文を表現するデータ型 (caml2html: syntax_t) *)
   | Eq of t * t
   | LE of t * t
   | If of t * t * t
-  | MATCH of t * (pattern * t) list
+  | Match of t * (pattern * t) list
   | LetVar of (Id.t * Type.t) * t * t
   | Var of Id.t
   | Constr of Id.t * t list
@@ -29,13 +29,13 @@ type t = (* uCamlの構文を表現するデータ型 (caml2html: syntax_t) *)
 and pattern =
   | PtBool of bool
   | PtInt of int
-  | PtVar of Id.t
+  | PtVar of Id.t * Type.t
   | PtTuple of pattern list
   | PtField of (Id.t * pattern) list
   | PtConstr of Id.t * pattern list
 and fundef = { name : Id.t * Type.t; args : (Id.t * Type.t) list; body : t }
 and def =
-  | TypeDef of Id.t * Type.t
+  | TypeDef of Id.t * Type.tycon
   | VarDef of (Id.t * Type.t) * t
   | RecDef of fundef
 
@@ -43,7 +43,7 @@ let rec string_of_pattern =
   function
   | PtBool(b) -> "PtBool(" ^ (string_of_bool b) ^ ")"
   | PtInt(n) -> "PtInt(" ^ (string_of_int n) ^ ")"
-  | PtVar(x) -> "PtVar(" ^ x ^ ")"
+  | PtVar(x, t) -> "PtVar(" ^ x ^ "," ^ (Type.string_of t) ^ ")"
   | PtTuple(ps) -> "PtTuple([" ^ (String.concat "; " (List.map string_of_pattern ps)) ^ "])"
   | PtField(xps) -> "PtField([" ^ (String.concat "; " (List.map (fun (x, p) -> x ^ ", " ^ (string_of_pattern p)) xps)) ^ "])"
   | PtConstr(x, ps) -> "PtConstr(" ^ x ^ ", [" ^ (String.concat "; " (List.map string_of_pattern ps)) ^ "])"
@@ -69,7 +69,7 @@ let rec string_of_exp =
   | Eq(e1, e2) -> "Eq(" ^ (string_of_exp e1) ^ ", " ^ (string_of_exp e2) ^ ")"
   | LE(e1, e2) -> "LE(" ^ (string_of_exp e1) ^ ", " ^ (string_of_exp e2) ^ ")"
   | If(e1, e2, e3) -> "If(" ^ (string_of_exp e1) ^ " then " ^ (string_of_exp e2) ^ " else " ^ (string_of_exp e3) ^ ")"
-  | MATCH(e, pes) -> "MATCH(" ^ (string_of_exp e) ^ ", [" ^ (String.concat "; " (List.map (fun (p, e) -> (string_of_pattern p) ^ " -> " ^ (string_of_exp e)) pes)) ^ "])"
+  | Match(e, pes) -> "Match(" ^ (string_of_exp e) ^ ", [" ^ (String.concat "; " (List.map (fun (p, e) -> (string_of_pattern p) ^ " -> " ^ (string_of_exp e)) pes)) ^ "])"
   | LetVar((x, t), e1, e2) -> "LetVar(" ^ x ^ " : " ^ (Type.string_of t) ^ " = " ^ (string_of_exp e1) ^ " in " ^ (string_of_exp e2) ^ ")"
   | Var(x) -> "Var(" ^ x ^ ")"
   | Constr(x, es) -> "Constr(" ^ x ^ ", " ^ (String.concat ", " (List.map string_of_exp es)) ^ ")"
@@ -82,20 +82,23 @@ let string_of_fundef { name = (x, t); args = yts; body = e } =
   x ^ " " ^ (String.concat " " (List.map (fun (y, t) -> y) yts)) ^ " : " ^ (Type.string_of t) ^ " = " ^ (string_of_exp e) 
 
 let rec string_of_def = function
-  | TypeDef(x, t) -> "TypeDef(" ^ x ^ ", " ^ (Type.string_of t) ^ ")"
+  | TypeDef(x, t) -> "TypeDef(" ^ x ^ ", " ^ (Type.string_of_tycon t) ^ ")"
   | VarDef((x, t), e) -> "VarDef((" ^ x ^ ", " ^ (Type.string_of t) ^ "), " ^ (string_of_exp e)
   | RecDef(fundef) -> "RecDef(" ^ (string_of_fundef fundef) ^ ")"
       
 let fold f defs =
   let _, defs' = 
     List.fold_left
-      (fun (env, defs) def -> 
-	let venv, tenv = env in
-	match def with
-	| TypeDef(x, t) -> ((M.add_list (Type.ids t) venv), (M.add_list ((x, t) :: (Type.types t)) tenv)), f (env, defs) def
-	| VarDef((x, t), e) -> ((M.add x t venv), tenv), f (env, defs) def
-	| RecDef({ name = (x, t); args = yts; body = e }) -> ((M.add x t venv), tenv), f (env, defs) def)
-      ((M.empty, M.add_list [("bool", Type.App(Type.Bool, [])); ("int", Type.App(Type.Int, []))] M.empty), []) defs in
+      (fun ({ Env.venv = var_types; types = types; tycons = tycons } as env, defs) def -> 
+        match def with
+        | TypeDef(x, t) -> 
+            { env with 
+              Env.types  = M.add_list (Type.types t) types; 
+              Env.tycons = M.add_list ((x, t) :: (Type.tycons t)) tycons }, 
+          f (env, defs) def
+        | VarDef((x, t), e) -> 
+            Env.add_var_type env x t, f (env, defs) def
+        | RecDef({ name = (x, t); args = yts; body = e }) -> 
+            Env.add_var_type env x t, f (env, defs) def)
+      (Env.empty, []) defs in
   List.rev defs'
-    
-    

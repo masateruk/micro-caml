@@ -1,8 +1,13 @@
 PWD = $(shell pwd)
 UNAME := $(shell uname -s)
 
+V ?= 0
 PROGRAM = ../ucaml
+ifeq ($(V), 1)
 OPTIONS := -v
+else
+OPTIONS := 
+endif
 TESTS = $(shell ls *.ml)
 DEFFILES = $(patsubst %.ml, %.d, $(TESTS))
 TRASH = *.log *.c *.d *.o *.out *.cmo *.cmi
@@ -13,7 +18,7 @@ INC_DIRS := \
 	/usr/local/include \
 	../lib/include
 
-CFLAGS := -g -Wall \
+CFLAGS := -g -Wall -Werror \
 	-DDEBUG \
 	-DUSE_GC=$(USE_GC) \
 	$(addprefix -I, $(INC_DIRS))

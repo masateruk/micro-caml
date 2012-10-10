@@ -17,6 +17,10 @@ rule token = parse
     { LPAREN }
 | ')'
     { RPAREN }
+| "begin"
+    { BEGIN }
+| "end"
+    { END }
 | '['
     { LSQUARE_BRANKET }
 | ']'
@@ -83,6 +87,8 @@ rule token = parse
     { WITH }
 | "->"
     { RIGHT_ARROW }
+| '''
+    { QUATE }
 | '_'
     { IDENT(Id.gentmp (Type.prefix (Type.App(Type.Unit, [])))) }
 | ':'

@@ -1,10 +1,10 @@
 type t = 
   | Var of tyvar 
-  | Field of t * t
+  | Field of Id.t * t
+  | Variant of Id.t * (Id.t * t list) list
   | App of tycon * t list 
   | Poly of tyvar list * t
   | Meta of t option ref
-  | NameTy of Id.t * t option ref
 and tycon = 
   | Unit 
   | Bool 
@@ -12,8 +12,8 @@ and tycon =
   | Arrow 
   | Tuple
   | Record of Id.t * Id.t list
-  | Variant of Id.t * (Id.t * t list) list
   | TyFun of tyvar list * t
+  | NameTycon of Id.t * tycon option ref
 and tyvar = Id.t
 and metavar = Id.t
 val counter : int ref
@@ -25,6 +25,7 @@ val prefix : t -> Id.t
 val ocaml_of : t -> Id.t
 val equal : t -> t -> bool
 val apply : t -> t list -> t
-val ids : t -> (Id.t * t) list
-val types : t -> (Id.t * t) list
+val tycons : tycon -> (Id.t * tycon) list
+val types : tycon -> (Id.t * t) list
 val name : t -> Id.t
+

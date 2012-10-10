@@ -9,28 +9,34 @@ type t =
   | NameTy of Id.t * t option ref
   | Box
   | Pointer of t
+  | Pseudo
 
-let rec string_of =
-  function
+let rec string_of reached t = 
+  match t with
   | Void -> "Void" 
   | Bool -> "Bool" 
   | Int -> "Int" 
   | Enum(x, ys) -> "Enum(" ^ x ^ ", [" ^ (String.concat "," ys) ^ "])"
-  | Fun(args, ret) -> (string_of ret) ^ " (*)(" ^ (String.concat ", " (List.map string_of args)) ^ ")" 
+  | Fun(args, ret) -> (string_of (t ::reached) ret) ^ " (*)(" ^ (String.concat ", " (List.map (string_of (t ::reached)) args)) ^ ")" 
+  | Struct(tag, _) when List.mem t reached -> "Struct " ^ tag
   | Struct(tag, xts) -> 
       "Struct " ^ tag ^ " (" ^ 
-        (String.concat ";" (List.map (fun (x, t) -> string_of t) xts)) ^ ";" ^ 
+        (String.concat ", " (List.map (fun (x, t') -> x ^ " : " ^ (string_of (t ::reached) t')) xts)) ^ 
         ")" 
   | Union(xts) -> 
       "Union (" ^ 
-        (String.concat ";\n" (List.map (fun (x, t) -> string_of t) xts)) ^ ";" ^ 
+        (String.concat ", " (List.map (fun (x, t') -> x ^ " : " ^ (string_of (t ::reached) t')) xts)) ^ 
         ")" 
-  | NameTy(x, { contents = Some(t) }) -> "NameTy(" ^ x ^ ", Some(" ^ (string_of t) ^ "))"
+  | NameTy(x, { contents = Some(t') }) -> "NameTy(" ^ x ^ ", Some(" ^ (string_of (t ::reached) t') ^ "))"
   | NameTy(x, _) -> "NameTy(" ^ x ^ ", None)"
   | Box -> "Box" 
-  | Pointer t -> "Pointer(" ^ (string_of t) ^ ")" 
+  | Pointer t -> "Pointer(" ^ (string_of (t ::reached) t) ^ ")" 
+  | Pseudo -> "Pseudo"
+
+let string_of = string_of []
       
 let rec equal t1 t2 = 
+  if t1 == t2 then true else
   match t1, t2 with
   | Void, Void | Int, Int | Bool, Bool -> true
   | Enum("", _), Int | Int, Enum("", _) | Enum("", _), Enum("", _) -> true
@@ -58,3 +64,4 @@ let rec prefix =
   | Union _ -> "u"
   | Box -> "v" 
   | Pointer _ -> assert false
+  | Pseudo -> assert false

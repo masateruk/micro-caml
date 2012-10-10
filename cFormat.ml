@@ -29,21 +29,33 @@ let rec string_of_type ?(depth = 0) ?(tags = []) =
   | CType.Fun _ -> assert false
   | CType.Struct(tag, xts) ->
       (indent depth) ^ "struct" ^ (if tag = "" then "" else " " ^ tag) ^ " {\n" ^ 
-        (String.concat ";\n" (List.map (fun (x, t) -> string_of_id ~depth:(depth + 1) ~tags:(tag::tags) x t) xts)) ^ ";\n" ^ 
+        (String.concat ";\n" 
+           (List.fold_left
+              (fun s (x, t) -> 
+                match t with
+                | CType.Pseudo -> s
+                | t -> (string_of_id ~depth:(depth + 1) ~tags:(tag::tags) x t) :: s) [] (List.rev xts))) ^ ";\n" ^ 
         (indent depth) ^ "}"
   | CType.Union(xts) ->
       (indent depth) ^ "union {\n" ^ 
-        (String.concat ";\n" (List.map (fun (x, t) -> string_of_id ~depth:(depth + 1) x t) xts)) ^ ";\n" ^ 
+        (String.concat ";\n" 
+           (List.fold_left
+              (fun s (x, t) -> 
+                match t with
+                | CType.Pseudo -> s
+                | t -> (string_of_id ~depth:(depth + 1) x t) :: s) [] (List.rev xts))) ^ ";\n" ^ 
         (indent depth) ^ "}"
   | CType.NameTy(x', _) when List.mem x' tags -> (indent depth) ^ "struct " ^ x'
   | CType.NameTy(x', _) -> (indent depth) ^ x'
   | CType.Box -> (indent depth) ^ "sp_t"
   | CType.Pointer t -> (indent depth) ^ (string_of_type ~tags:tags t) ^ "*" 
+  | CType.Pseudo -> (indent depth)
       
 and string_of_id ?(depth = 0) ?(tags = []) x = 
   function
   | CType.Fun(args, ret) -> 
       (indent depth) ^ (string_of_type ret) ^ " (*" ^ x ^ ")(" ^ (String.concat ", " (List.map (string_of_type ~tags:tags) args)) ^ ")" 
+  | CType.Pseudo -> ""
   | t -> 
       (string_of_type ~depth:depth ~tags:tags t) ^ " " ^ x
         

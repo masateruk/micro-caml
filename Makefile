@@ -1,4 +1,4 @@
-SOURCES = d.ml l.ml id.ml m.ml type.mli type.ml syntax.ml parser.mly lexer.mll s.ml typing.mli typing.ml wrap.mli wrap.ml kNormal.mli kNormal.ml alpha.mli alpha.ml assoc.mli assoc.ml closure.mli closure.ml cType.ml c.mli c.ml optimize.ml cFormat.ml main.ml
+SOURCES = d.ml l.ml id.ml m.ml type.mli type.ml env.ml syntax.ml parser.mly lexer.mll s.ml typing.mli typing.ml wrap.mli wrap.ml kNormal.mli kNormal.ml alpha.mli alpha.ml assoc.mli assoc.ml closure.mli closure.ml cType.ml c.mli c.ml optimize.ml cFormat.ml main.ml
 RESULT = ucaml
 LIBS = str
 
@@ -11,7 +11,9 @@ endif
 CC = gcc
 CFLAGS = -g -Wall 
 
-TRASH = *.cmt *.cmti *.annot .typerex
+export V ?= 0
+export TESTS ?=
+TRASH = *.cmt *.cmti *.annot .typerex parser.output
 
 .PHONY:all debug-check do-test full_test lib clean-test
 
