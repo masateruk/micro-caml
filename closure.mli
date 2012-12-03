@@ -1,5 +1,7 @@
 type closure = { entry : Id.l; actual_fv : Id.t list }
-type t = 
+type t = (* クロージャ変換後の式 (caml2html: closure_t) *)
+    term * Type.t
+and term =
   | Unit
   | Nil of Type.t
   | WrapBody of Id.t * Type.t
@@ -10,7 +12,9 @@ type t =
   | Match of Id.t * (pattern * t) list
   | Let of (Id.t * Type.t) * t * t
   | MakeCls of (Id.t * Type.t) * closure * t
-and e = 
+and e =
+    expr * Type.t
+and expr = 
   | Bool of bool
   | Int of int
   | Record of (Id.t * e) list
@@ -35,7 +39,7 @@ and pattern =
   | PtInt of int
   | PtVar of Id.t * Type.t
   | PtTuple of pattern list
-  | PtField of (Id.t * pattern) list
+  | PtRecord of (Id.t * pattern) list
   | PtConstr of Id.t * pattern list
 type fundef = {
   name : Id.l * Type.t;
@@ -50,8 +54,10 @@ and def =
 type prog = Prog of def list
 
 val string_of_pattern : pattern -> string
-val string_of_e : e -> string
-val string_of_exp : t -> string
+val string_of_typed_expr : e -> string
+val string_of_expr : expr -> string
+val string_of_typed_term : t -> string
+val string_of_term : term -> string
 val string_of_def : def -> string
 val fv : t -> S.t
 val f : KNormal.def list -> prog

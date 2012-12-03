@@ -2,6 +2,8 @@
 (* 変換後のコードをなるべくオリジナルに近いものにするため、実際にはほとんどK正規形にはしない。 *)
 
 type t = (* K正規化後の式 (caml2html: knormal_t) *)
+    term * Type.t
+and term =
   | Unit
   | Nil of Type.t
   | Exp of e
@@ -12,7 +14,9 @@ type t = (* K正規化後の式 (caml2html: knormal_t) *)
   | LetRec of fundef * t
   | WrapBody of Id.t * Type.t
   | UnwrapBody of Id.t * Type.t
-and e =
+and e = 
+    expr * Type.t
+and expr =
   | Bool of bool
   | Int of int
   | Record of (Id.t * e) list
@@ -54,214 +58,158 @@ let rec ocaml_of_pattern =
   | PtField(xps) -> String.concat ", " (List.map (fun (x, p) -> x ^ " = " ^ (ocaml_of_pattern p)) xps)
   | PtConstr(x, ps) -> x ^ ", " ^ String.concat ", " (List.map ocaml_of_pattern ps)
 
-let rec ocaml_of_e = 
+let rec string_of_typed_expr (e, t) = (string_of_expr e) ^ " : " ^ (Type.string_of t)
+
+and string_of_expr = 
   function
   | Bool(b) -> string_of_bool b
   | Int(n) -> string_of_int n
-  | Record(xes) -> "{" ^ (String.concat "; " (List.map (fun (x, e) -> x ^ " = " ^ (ocaml_of_e e)) xes)) ^ "}"
-  | Field(e, x) -> (ocaml_of_e e) ^ "." ^ x
-  | Tuple(es) -> "(" ^ (String.concat ", " (List.map ocaml_of_e es)) ^ ")"
-  | Not(e) -> "not " ^ (ocaml_of_e e)
-  | And(e1, e2) -> (ocaml_of_e e1) ^ " && " ^ (ocaml_of_e e2)
-  | Or(e1, e2) -> (ocaml_of_e e1) ^ " || " ^ (ocaml_of_e e2)
-  | Neg(e) -> "! " ^ (ocaml_of_e e)
-  | Add(e1, e2) -> (ocaml_of_e e1) ^ " + " ^ (ocaml_of_e e2)
-  | Sub(e1, e2) -> (ocaml_of_e e1) ^ " - " ^ (ocaml_of_e e2)
-  | Mul(e1, e2) -> (ocaml_of_e e1) ^ " * " ^ (ocaml_of_e e2)
-  | Div(e1, e2) -> (ocaml_of_e e1) ^ " / " ^ (ocaml_of_e e2)
+  | Record(xes) -> "{" ^ (String.concat "; " (List.map (fun (x, e) -> x ^ " = " ^ (string_of_typed_expr e)) xes)) ^ "}"
+  | Field(e, x) -> (string_of_typed_expr e) ^ "." ^ x
+  | Tuple(es) -> "(" ^ (String.concat ", " (List.map string_of_typed_expr es)) ^ ")"
+  | Not(e) -> "not " ^ (string_of_typed_expr e)
+  | And(e1, e2) -> (string_of_typed_expr e1) ^ " && " ^ (string_of_typed_expr e2)
+  | Or(e1, e2) -> (string_of_typed_expr e1) ^ " || " ^ (string_of_typed_expr e2)
+  | Neg(e) -> "! " ^ (string_of_typed_expr e)
+  | Add(e1, e2) -> (string_of_typed_expr e1) ^ " + " ^ (string_of_typed_expr e2)
+  | Sub(e1, e2) -> (string_of_typed_expr e1) ^ " - " ^ (string_of_typed_expr e2)
+  | Mul(e1, e2) -> (string_of_typed_expr e1) ^ " * " ^ (string_of_typed_expr e2)
+  | Div(e1, e2) -> (string_of_typed_expr e1) ^ " / " ^ (string_of_typed_expr e2)
   | Var(x) -> x
   | Constr(x, []) -> x
-  | Constr(x, es) -> "(" ^ x ^ (String.concat ", " (List.map ocaml_of_e es)) ^ ")"
-  | Eq(e1, e2) -> (ocaml_of_e e1) ^ " = " ^ (ocaml_of_e e2)
-  | LE(e1, e2) -> (ocaml_of_e e1) ^ " <= " ^ (ocaml_of_e e2) 
-  | App(e, args) -> "(" ^ (ocaml_of_e e) ^ " " ^ (String.concat " " (List.map ocaml_of_e args)) ^ ")"
-  | ExtFunApp(x, args) -> "(" ^ x ^ " " ^ (String.concat " " (List.map ocaml_of_e args)) ^ ")"
-    
-let rec ocaml_of_t = 
+  | Constr(x, es) -> "(" ^ x ^ (String.concat ", " (List.map string_of_typed_expr es)) ^ ")"
+  | Eq(e1, e2) -> (string_of_typed_expr e1) ^ " = " ^ (string_of_typed_expr e2)
+  | LE(e1, e2) -> (string_of_typed_expr e1) ^ " <= " ^ (string_of_typed_expr e2) 
+  | App(e, args) -> "(" ^ (string_of_typed_expr e) ^ " " ^ (String.concat " " (List.map string_of_typed_expr args)) ^ ")"
+  | ExtFunApp(x, args) -> "(" ^ x ^ " " ^ (String.concat " " (List.map string_of_typed_expr args)) ^ ")"
+
+let rec string_of_typed_term (e, t) = (string_of_term e) ^ " : " ^ (Type.string_of t)
+
+and string_of_term = 
   function
   | Unit -> "()"
   | Nil _ -> "[]"
-  | Exp(e) -> ocaml_of_e e
+  | Exp(e) -> string_of_typed_expr e
   | Cons _ -> assert false
-  | If(e, e1, e2) -> "if " ^ (ocaml_of_e e) ^ "\n\tthen " ^ (ocaml_of_t e1) ^ "\n\telse " ^ (ocaml_of_t e2)
-  | Match(x, pes) -> "match " ^ x ^ " with\n" ^ (String.concat "\n" (List.map (fun (p, e) -> " | " ^ (ocaml_of_pattern p) ^ " -> " ^ (ocaml_of_t e)) pes))
-  | Let((s1, t), e1, e2) -> "\nlet " ^ s1 ^ " : " ^ (Type.ocaml_of  t) ^ " = " ^ (ocaml_of_t e1) ^ " in\n" ^ (ocaml_of_t e2)
+  | If(e, e1, e2) -> "if " ^ (string_of_typed_expr e) ^ "\n\tthen " ^ (string_of_typed_term e1) ^ "\n\telse " ^ (string_of_typed_term e2)
+  | Match(x, pes) -> "match " ^ x ^ " with\n" ^ (String.concat "\n" (List.map (fun (p, e) -> " | " ^ (ocaml_of_pattern p) ^ " -> " ^ (string_of_typed_term e)) pes))
+  | Let((s1, t), e1, e2) -> "\nlet " ^ s1 ^ " : " ^ (Type.ocaml_of  t) ^ " = " ^ (string_of_typed_term e1) ^ " in\n" ^ (string_of_typed_term e2)
   | LetRec({ name = (x, t); args = yts; body = e1 }, e2) -> 
       "\nlet rec " ^ x ^ " " ^ (String.concat " " (List.map (fun (y, t) -> y) yts)) ^ " : " ^ (Type.ocaml_of  t) ^ " =\n"
-      ^ (ocaml_of_t e1) ^ " in\n" ^ (ocaml_of_t e2)
+      ^ (string_of_typed_term e1) ^ " in\n" ^ (string_of_typed_term e2)
   | WrapBody(x, t) -> "(* wrapper " ^ x ^ " " ^ (Type.string_of t) ^ " *)"
   | UnwrapBody(x, t) -> "(* unwrapper " ^ x ^ " " ^ (Type.string_of t) ^ " *)"
 
 let rec insert_let (e, t) k = (* letを挿入する補助関数 (caml2html: knormal_insert) *)
   match e with
-  | Exp(e) -> k (e, t)
-  | LetRec(fundef, e) ->
-      let e', t' = insert_let (e, t) k in
-      LetRec(fundef, e'), t'
+  | Exp(e) -> k e
+  | LetRec(fundef, et) ->
+      let e' = insert_let et k in
+      LetRec(fundef, (e', t))
   | _ ->
       let x = Id.gentmp (Type.prefix t) in
-      let e', t' = k (Var(x), t) in
-      Let((x, t), e, e'), t'
+      let e' = k (Var(x), t) in
+      Let((x, t), (e, t), (e', t))
 
-let rec h env (p, t) = 
-  match p, t with
-  | Syntax.PtBool(b), _ -> env, (PtBool(b))
-  | Syntax.PtInt(n), _ -> env, (PtInt(n))
-  | Syntax.PtVar(x, t), _ -> Env.add_var_type env x t, (PtVar(x, t))
-  | Syntax.PtTuple(ps), t -> 
-      begin
-        match t with
-        | Type.App(Type.Tuple, ts) -> 
-            let env', ps' = 
-              List.fold_left 
-                (fun (env, ps) (p, t) -> 
-                  let env', p = h env (p, t) in
-                  (env', p :: ps)) 
-                (env, []) (List.combine ps ts) in
-            env', PtTuple(ps')
-        | t -> Printf.eprintf "invalid type : %s\n" (Type.string_of t); assert false
-      end
-  | Syntax.PtField(xps), t -> 
-      begin
-        match t with
-        | Type.App(Type.Record(_, ys), ts) -> 
-            let env', xps' = 
-              List.fold_left 
-                (fun (env, xps) ((x, p), t) -> 
-                  let env', p = h env (p, t) in
-                  (env', (x, p) :: xps)) 
-                (env, []) (List.combine xps ts) in
-            env', PtField(xps')
-        | t -> Printf.eprintf "invalid type : %s\n" (Type.string_of t); assert false
-      end
-  | Syntax.PtConstr(x, []), t -> Env.add_var_type env x t, (PtConstr(x, []))
-  | Syntax.PtConstr(x, ps), t -> 
-      begin
-        match t with
-        | Type.Variant(_, ytss) ->
-            let env', ps' = 
-              List.fold_left 
-                (fun (env, ps) (p, t) -> 
-                  let env', p = h env (p, t) in
-                  (env', p :: ps)) 
-                (env, []) (List.combine ps (snd (List.find (fun (y, _) -> x = y) ytss))) in
-            env', PtConstr(x, ps')
-        | t -> Printf.eprintf "invalid type : %s\n" (Type.string_of t); assert false
-      end
+let rec pattern env p = 
+  let () = D.printf "KNormal.pattern %s\n" (Syntax.string_of_pattern p) in
+  match p with
+  | Syntax.PtBool(b) -> env, (PtBool(b))
+  | Syntax.PtInt(n) -> env, (PtInt(n))
+  | Syntax.PtVar(x, t) -> Env.add_var_type env x t, (PtVar(x, t))
+  | Syntax.PtTuple(ps) -> 
+      let env, ps' = List.fold_left (fun (env, ps) p -> let env', p' = pattern env p in env', p' :: ps) (env, []) (List.rev ps) in
+      env, PtTuple(ps')
+  | Syntax.PtRecord(xps) -> 
+      let env, xps' = List.fold_left (fun (env, xps) (x, p) -> let env', p' = pattern env p in env', (x, p') :: xps) (env, []) (List.rev xps) in
+      env, PtField(xps')
+  | Syntax.PtConstr(x, ps) -> 
+      let env, ps' = List.fold_left (fun (env, ps) p -> let env', p' = pattern env p in env', p' :: ps) (env, []) (List.rev ps) in
+      env, PtConstr(x, ps')
         
-let rec g ({ Env.venv = venv; types = types; tycons = tycons } as env) e = (* K正規化ルーチン本体 (caml2html: knormal_g) *)
-  let _ = D.printf "kNormal.g %s\n" (Syntax.string_of_exp e) in  
+let rec g ({ Env.venv = venv; types = types; tycons = tycons } as env) (e, t) = (* K正規化ルーチン本体 (caml2html: knormal_g) *)
+  let _ = D.printf "kNormal.g %s\n" (Syntax.string_of_expr e) in  
+
   let insert_lets es k =
     let rec insert_lets' es k args =
       match es with
       | [] -> k args
       | (e::es') -> insert_let (g env e) (fun et' -> insert_lets' es' k (args @ [et'])) in
     insert_lets' es k [] in
-  let binop e1 e2 f t =
+
+  let binop e1 e2 f =
     insert_let (g env e1)
-      (fun (e1', _) -> insert_let (g env e2)
-        (fun (e2', _) -> f e1' e2', t)) in
-  match e with
-  | Syntax.Unit -> Unit, Type.App(Type.Unit, [])
-  | Syntax.Nil(t) -> Nil(t), t
-  | Syntax.Bool(b) -> Exp(Bool(b)), Type.App(Type.Bool, [])
-  | Syntax.Int(i) -> Exp(Int(i)), Type.App(Type.Int, [])
-  | Syntax.Record(xes) ->
-      insert_lets (List.map snd xes) (fun ets' -> Exp(Record(List.combine (List.map fst xes) (List.map fst ets'))), 
-        (match M.find (fst (List.hd xes)) types with
-        | Type.Poly(_, Type.Field(tid, _)) -> 
-            (Type.App(M.find tid tycons, []))
-        | t -> Printf.eprintf "invalid type : t = %s\n" (Type.string_of t); assert false))
-  | Syntax.Field(e, x) -> 
-      let e', t = g env e in 
-      insert_let (e', t) (fun (e, t) -> Exp(Field(e, x)), 
-      (match t with 
-      | Type.App(Type.Record(_, xs), ts) -> List.assoc x (List.combine xs ts)
-      | t -> Printf.eprintf "invalid type : t = %s\n" (Type.string_of t); assert false))
-  | Syntax.Tuple(es) -> insert_lets es (fun ets' -> Exp(Tuple(List.map fst ets')), Type.App(Type.Tuple, List.map snd ets'))
-  | Syntax.Not(e) -> insert_let (g env e) (fun (e, _) -> Exp(Not(e)), Type.App(Type.Bool, []))
-  | Syntax.And(e1, e2) -> binop e1 e2 (fun e1' e2' -> Exp(And(e1', e2'))) (Type.App(Type.Bool, []))
-  | Syntax.Or(e1, e2) -> binop e1 e2 (fun e1' e2' -> Exp(Or(e1', e2'))) (Type.App(Type.Bool, []))
-  | Syntax.Neg(e) -> insert_let (g env e) (fun (e, _) -> Exp(Neg(e)), Type.App(Type.Int, []))
-  | Syntax.Add(e1, e2) -> binop e1 e2 (fun e1' e2' -> Exp(Add(e1', e2'))) (Type.App(Type.Int, [])) (* 足し算のK正規化 (caml2html: knormal_add) *)
-  | Syntax.Sub(e1, e2) -> binop e1 e2 (fun e1' e2' -> Exp(Sub(e1', e2'))) (Type.App(Type.Int, [])) 
-  | Syntax.Mul(e1, e2) -> binop e1 e2 (fun e1' e2' -> Exp(Mul(e1', e2'))) (Type.App(Type.Int, [])) 
-  | Syntax.Div(e1, e2) -> binop e1 e2 (fun e1' e2' -> Exp(Div(e1', e2'))) (Type.App(Type.Int, [])) 
-  | Syntax.Cons(e1, e2) -> assert false
-  | Syntax.Var(x) -> Exp(Var(x)), M.find x venv
-  | Syntax.Constr(x, []) -> Exp(Constr(x, [])), 
-    (match M.find x tycons with
-(*    | Type.TyFun(xs, ((Type.App(Type.Int, [])) as t)) -> t *)
-    | Type.TyFun(xs, t) -> t 
-    | t -> Printf.eprintf "invalid type constructor : t = %s\n" (Type.string_of_tycon t); assert false)
-  | Syntax.Constr(x, es) -> 
-      insert_lets es (fun ets' -> Exp(Constr(x, (List.map fst ets'))), 
-        (match M.find x tycons with
-        | Type.TyFun(xs, (Type.App(Type.Arrow, ys) as t)) -> 
-            let xs' = List.map (fun _ -> Type.Meta(Type.newmetavar ())) xs in
-            let t' = Typing.subst env (M.add_list2 xs xs' M.empty) t in
-            t (* TODO : think again. this type never be used now. why not ? *)
-        | t -> Printf.eprintf "invalid type : t = %s\n" (Type.string_of_tycon t); assert false))
-  | Syntax.Eq(e1, e2) -> binop e1 e2 (fun e1' e2' -> Exp(Eq(e1', e2'))) (Type.App(Type.Bool, []))
-  | Syntax.LE(e1, e2) -> binop e1 e2 (fun e1' e2' -> Exp(LE(e1', e2'))) (Type.App(Type.Bool, []))
-  | Syntax.If(e1, e2, e3) -> 
-      let e1', t1 = g env e1 in
-      let e2', t2 = g env e2 in
-      let e3', t3 = g env e3 in
-      insert_let (e1', t1) (fun (x, _) -> If(x, e2', e3'), t3)
-  | Syntax.Match(Syntax.Var(x), pes) ->
-      let pets = List.map 
-        (fun (p, e) -> 
-          let env', p' = h env (p, (M.find x venv)) in
-          let e', t = g env' e in 
-          (p', e'), t)
-        pes in
-      Match(x, List.map fst pets), snd (List.hd pets)
-  | Syntax.Match(e, pes) ->
-      let e', t = g env e in
-      let pets = List.map 
-        (fun (p, e) -> 
-          let env', p' = h env (p, t) in
-          let e', t = g env' e in 
-          (p', e'), t)
-        pes in
-      let x = Id.gentmp (Type.prefix t) in
-      Let((x, t), e', (Match(x, List.map fst pets))), snd (List.hd pets)
-  | Syntax.LetVar((x, t), e1, e2) ->
-      let e1', t1 = g env e1 in
-      let e2', t2 = g (Env.add_var_type env x t) e2 in
-      Let((x, t), e1', e2'), t2
-  | Syntax.LetRec({ Syntax.name = (x, t); Syntax.args = yts; Syntax.body = e1 }, e2) ->
-      let venv' = M.add x t venv in
-      let e2', t2 = g { env with Env.venv = venv' } e2 in
-      let e1', t1 = g { env with Env.venv = M.add_list yts venv' } e1 in
-      LetRec({ name = (x, t); args = yts; body = e1' }, e2'), t2
-  | Syntax.App(Syntax.Var(f), e2s) when not (M.mem f venv) -> (* 外部関数の呼び出し (caml2html: knormal_extfunapp) *)
-      (match M.find f !Env.extenv with
-      | Type.App(Type.Arrow, ts) ->
-          let t = List.hd (List.rev ts) in
-          let rec bind xs = function (* "xs" are identifiers for the arguments *)
-          | [] -> Exp(ExtFunApp(f, xs)), t
-          | e2 :: e2s ->
-              insert_let (g env e2)
-                (fun (x, _) -> bind (xs @ [x]) e2s) in
-          (bind [] e2s) (* left-to-right evaluation *)
-      | _ -> assert false)
-  | Syntax.App(e1, e2s) ->
-      (match g env e1 with
-      | _, Type.App(Type.Arrow, ts) as g_e1 ->
-          let t = List.hd (List.rev ts) in
-          insert_let g_e1
-            (fun (f, _) ->
-              let rec bind xs = function (* "xs" are identifiers for the arguments *)
-              | [] -> Exp(App(f, xs)), t
-              | e2 :: e2s ->
-                  insert_let (g env e2)
-                    (fun (x, _) -> bind (xs @ [x]) e2s) in
-              bind [] e2s) (* left-to-right evaluation *)
-      | _, t -> Printf.eprintf "type is %s\n" (Type.string_of t); assert false)
-  | Syntax.WrapBody(x, t) -> WrapBody(x, t), t
-  | Syntax.UnwrapBody(x, t) -> UnwrapBody(x, t), t
+      (fun e1' -> insert_let (g env e2)
+        (fun e2' -> f e1' e2')) in
+
+  let e' = 
+    match e with
+    | Syntax.Unit -> Unit
+    | Syntax.Nil(t) -> Nil(t)
+    | Syntax.Bool(b) -> Exp(Bool(b), t)
+    | Syntax.Int(n) -> Exp(Int(n), t)
+    | Syntax.Record(xes) ->
+        insert_lets (List.map snd xes) (fun ets' -> Exp(Record(List.combine (List.map fst xes) ets'), t))
+    | Syntax.Field(e, x) -> insert_let (g env e) (fun e' -> Exp(Field(e', x), t))
+    | Syntax.Tuple(es) -> insert_lets es (fun es' -> Exp(Tuple(es'), t))
+    | Syntax.Not(e) -> insert_let (g env e) (fun e' -> Exp(Not(e'), t))
+    | Syntax.And(e1, e2) -> binop e1 e2 (fun e1' e2' -> Exp(And(e1', e2'), t))
+    | Syntax.Or(e1, e2) -> binop e1 e2 (fun e1' e2' -> Exp(Or(e1', e2'), t))
+    | Syntax.Neg(e) -> insert_let (g env e) (fun e' -> Exp(Neg(e'), t))
+    | Syntax.Add(e1, e2) -> binop e1 e2 (fun e1' e2' -> Exp(Add(e1', e2'), t)) (* 足し算のK正規化 (caml2html: knormal_add) *)
+    | Syntax.Sub(e1, e2) -> binop e1 e2 (fun e1' e2' -> Exp(Sub(e1', e2'), t))
+    | Syntax.Mul(e1, e2) -> binop e1 e2 (fun e1' e2' -> Exp(Mul(e1', e2'), t))
+    | Syntax.Div(e1, e2) -> binop e1 e2 (fun e1' e2' -> Exp(Div(e1', e2'), t))
+    | Syntax.Cons(e1, e2) -> assert false
+    | Syntax.Var(x) -> Exp(Var(x), t)
+    | Syntax.Constr(x, es) -> insert_lets es (fun es' -> Exp(Constr(x, es'), t))
+    | Syntax.Eq(e1, e2) -> binop e1 e2 (fun e1' e2' -> Exp(Eq(e1', e2'), t))
+    | Syntax.LE(e1, e2) -> binop e1 e2 (fun e1' e2' -> Exp(LE(e1', e2'), t))
+    | Syntax.If(e1, e2, e3) -> insert_let (g env e1) (fun e1' -> If(e1', (g env e2), (g env e3)))
+    | Syntax.Match((Syntax.Var(x), _), pes) ->
+        let pes' = List.map 
+          (fun (p, e) -> 
+            let env', p' = pattern env p in
+            let e' = g env' e in 
+            p', e')
+          pes in
+        Match(x, pes')
+    | Syntax.Match(e, pes) ->
+        let e' = g env e in
+        let pes' = List.map 
+          (fun (p, e) -> 
+            let env', p' = pattern env p in
+            let e' = g env' e in 
+            p', e')
+          pes in
+        let x = Id.gentmp (Type.prefix t) in
+        Let((x, t), e', (Match(x, pes'), t))
+    | Syntax.LetVar((x, t), e1, e2) ->
+        let e1' = g env e1 in
+        let e2' = g (Env.add_var_type env x t) e2 in
+        Let((x, t), e1', e2')
+    | Syntax.LetRec({ Syntax.name = (x, t); Syntax.args = yts; Syntax.body = e1 }, e2) ->
+        let venv' = M.add x t venv in
+        let e2' = g { env with Env.venv = venv' } e2 in
+        let e1' = g { env with Env.venv = M.add_list yts venv' } e1 in
+        LetRec({ name = (x, t); args = yts; body = e1' }, e2')
+    | Syntax.App((Syntax.Var(f), _), e2s) when not (M.mem f venv) -> (* 外部関数の呼び出し (caml2html: knormal_extfunapp) *)
+        let rec bind xs = (* "xs" are identifiers for the arguments *)
+          function 
+          | [] -> Exp(ExtFunApp(f, xs), t)
+          | e2 :: e2s -> insert_let (g env e2) (fun x -> bind (xs @ [x]) e2s) in
+        (bind [] e2s) (* left-to-right evaluation *)
+    | Syntax.App(e1, e2s) ->
+        insert_let (g env e1)
+          (fun f ->
+            let rec bind xs = (* "xs" are identifiers for the arguments *)
+              function 
+              | [] -> Exp(App(f, xs), t)
+              | e2 :: e2s -> insert_let (g env e2) (fun x -> bind (xs @ [x]) e2s) in
+            bind [] e2s) (* left-to-right evaluation *)
+    | Syntax.WrapBody(x, t) -> WrapBody(x, t)
+    | Syntax.UnwrapBody(x, t) -> UnwrapBody(x, t) in
+  (e', t)
         
 let fold f env defs = 
   let _, defs' = List.fold_left f (env, []) defs in
@@ -285,7 +233,7 @@ let map f defs =
     env', (def' :: defs) in
   fold f' Env.empty defs
 
-let f' env e = fst (g env e)
+let f' env e = g env e
 
 let f = 
   Syntax.fold (fun (env, defs) def -> 

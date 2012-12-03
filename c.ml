@@ -1,40 +1,40 @@
 type t = (* C言語の文 *)
-  | Dec of (Id.t * CType.t) * exp option
-  | Assign of exp * exp
-  | Exp of exp
-  | If of exp * t * t
-  | Return of exp
+  | Dec of (Id.t * CType.t) * expr option
+  | Assign of expr * expr
+  | Exp of expr
+  | If of expr * t * t
+  | Return of expr
   | Seq of t * t
   | Block of dec list * t
 and dec =
-  | VarDec of (Id.t * CType.t) * exp option
-and exp = (* C言語の式 *) 
+  | VarDec of (Id.t * CType.t) * expr option
+and expr = (* C言語の式 *) 
   | Nop
   | Nil of CType.t
   | Bool of bool
   | Int of int
-  | Struct of Id.t * (Id.t * exp) list (* 構造体の型名とフィールドと式のリスト *)
-  | Field of exp * Id.t
-  | Not of exp
-  | And of exp * exp
-  | Or of exp * exp
-  | Neg of exp
-  | Add of exp * exp
-  | Sub of exp * exp
-  | Mul of exp * exp
-  | Div of exp * exp
-  | Eq of exp * exp
-  | LE of exp * exp
+  | Struct of Id.t * (Id.t * expr) list (* 構造体の型名とフィールドと式のリスト *)
+  | Field of expr * Id.t
+  | Not of expr
+  | And of expr * expr
+  | Or of expr * expr
+  | Neg of expr
+  | Add of expr * expr
+  | Sub of expr * expr
+  | Mul of expr * expr
+  | Div of expr * expr
+  | Eq of expr * expr
+  | LE of expr * expr
   | Cons of Id.t * Id.t
   | Var of Id.t
-  | Cond of exp * exp * exp
-  | CallDir of exp * exp list
-  | Let of (Id.t * CType.t) * exp * exp
+  | Cond of expr * expr * expr
+  | CallDir of expr * expr list
+  | Let of (Id.t * CType.t) * expr * expr
   | MakeClosure of Id.l * Id.t * (Id.t * CType.t) list
   | Sizeof of CType.t
-  | Ref of exp
-  | Deref of exp
-  | Cast of CType.t * exp
+  | Ref of expr
+  | Deref of expr
+  | Cast of CType.t * expr
   | Comma (* いまは演算子の優先順位のためだけに使用している *)
 type fundef = { name : Id.l; args : (Id.t * CType.t) list; body : t; ret : CType.t }
 type def =
@@ -74,34 +74,34 @@ let rec string_of_type ?(x = "") ?(depth = 0) =
     | CType.Pointer t -> (string_of_indent depth) ^ (string_of_type t) ^ "*" ^ (plus x)
     | CType.Pseudo -> (string_of_indent depth)
         
-let rec string_of_exp = 
+let rec string_of_expr = 
   function
   | Nop -> ""
   | Nil _ -> "nil"
   | Bool(b) -> string_of_bool b
   | Int(i) -> string_of_int i
-  | Struct(x, xes) -> "(" ^ x ^ "){" ^ (String.concat ", " (List.map (fun (x, e) -> "." ^ x ^ " = " ^ (string_of_exp e)) xes)) ^ "}"
-  | Field(e, y) -> (string_of_exp e) ^ "." ^ y
-  | Not(e) -> "!" ^ (string_of_exp e)
-  | And(e1, e2) -> "And(" ^ (string_of_exp e1) ^ ", " ^ (string_of_exp e2) ^ ")"
-  | Or(e1, e2) -> (string_of_exp e1) ^ " || " ^ (string_of_exp e2)
-  | Neg(e) -> "-" ^ (string_of_exp e)
-  | Add(e1, e2) -> (string_of_exp e1) ^ " + " ^ (string_of_exp e2)
-  | Sub(e1, e2) -> (string_of_exp e1) ^ " - " ^ (string_of_exp e2)
-  | Mul(e1, e2) -> (string_of_exp e1) ^ " * " ^ (string_of_exp e2)
-  | Div(e1, e2) -> (string_of_exp e1) ^ " / " ^ (string_of_exp e2)
-  | Eq(e1, e2) -> (string_of_exp e1) ^ " == " ^ (string_of_exp e2)
-  | LE(e1, e2) -> (string_of_exp e1) ^ " <= " ^ (string_of_exp e2)
+  | Struct(x, xes) -> "(" ^ x ^ "){" ^ (String.concat ", " (List.map (fun (x, e) -> "." ^ x ^ " = " ^ (string_of_expr e)) xes)) ^ "}"
+  | Field(e, y) -> (string_of_expr e) ^ "." ^ y
+  | Not(e) -> "!" ^ (string_of_expr e)
+  | And(e1, e2) -> "And(" ^ (string_of_expr e1) ^ ", " ^ (string_of_expr e2) ^ ")"
+  | Or(e1, e2) -> (string_of_expr e1) ^ " || " ^ (string_of_expr e2)
+  | Neg(e) -> "-" ^ (string_of_expr e)
+  | Add(e1, e2) -> (string_of_expr e1) ^ " + " ^ (string_of_expr e2)
+  | Sub(e1, e2) -> (string_of_expr e1) ^ " - " ^ (string_of_expr e2)
+  | Mul(e1, e2) -> (string_of_expr e1) ^ " * " ^ (string_of_expr e2)
+  | Div(e1, e2) -> (string_of_expr e1) ^ " / " ^ (string_of_expr e2)
+  | Eq(e1, e2) -> (string_of_expr e1) ^ " == " ^ (string_of_expr e2)
+  | LE(e1, e2) -> (string_of_expr e1) ^ " <= " ^ (string_of_expr e2)
   | Cons(x, y) -> x ^ " :: " ^ y
   | Var(x) -> x
-  | Cond(e, e1, e2) -> (string_of_exp e) ^ " ? " ^ (string_of_exp e1) ^ " : " ^ (string_of_exp e2)
-  | CallDir(x, xs) ->  (string_of_exp x) ^ "(" ^ (String.concat ", " (List.map string_of_exp xs)) ^ ")"
-  | Let((x, t), e1, e2)  -> "let " ^ (string_of_type t) ^ " " ^ x ^ " = " ^ (string_of_exp e1) ^ " in " ^ (string_of_exp e2)
+  | Cond(e, e1, e2) -> (string_of_expr e) ^ " ? " ^ (string_of_expr e1) ^ " : " ^ (string_of_expr e2)
+  | CallDir(x, xs) ->  (string_of_expr x) ^ "(" ^ (String.concat ", " (List.map string_of_expr xs)) ^ ")"
+  | Let((x, t), e1, e2)  -> "let " ^ (string_of_type t) ^ " " ^ x ^ " = " ^ (string_of_expr e1) ^ " in " ^ (string_of_expr e2)
   | MakeClosure(Id.L(l), x, yts) -> l ^ "(" ^ x ^ ", " ^ (String.concat ", " (List.map fst yts)) ^ ")" 
   | Sizeof(t) -> "sizeof(" ^ (string_of_type t) ^ ")"
-  | Ref(e) -> "&" ^ (string_of_exp e)
-  | Deref(e) -> "*(" ^ (string_of_exp e) ^ ")"
-  | Cast(t, e) -> "(" ^ (string_of_type t) ^ ")" ^ (string_of_exp e)
+  | Ref(e) -> "&" ^ (string_of_expr e)
+  | Deref(e) -> "*(" ^ (string_of_expr e) ^ ")"
+  | Cast(t, e) -> "(" ^ (string_of_type t) ^ ")" ^ (string_of_expr e)
   | Comma -> assert false
       
 let rec string_of_separator = 
@@ -114,18 +114,18 @@ let rec string_of_separator =
 let rec string_of_statement depth = 
   function
   | Dec((x, t), None) -> (string_of_indent depth) ^ (string_of_type ~x:x t)
-  | Dec((x, t), Some(e)) -> (string_of_indent depth) ^ (string_of_type ~x:x t) ^ " = " ^ (string_of_exp e)
-  | Assign(x, e) -> (string_of_indent depth) ^ (string_of_exp x) ^ " = " ^ (string_of_exp e)
-  | Exp(e) -> "Exp(" ^ (string_of_exp e) ^ ")"
-  | If(e, s1, s2) -> "If(" ^ (string_of_exp e) ^ ", " ^ (string_of_statement depth s1) ^ " , " ^ (string_of_statement depth s2) ^ ")"
-  | Return(e) -> (string_of_indent depth) ^ "return " ^ (string_of_exp e)
+  | Dec((x, t), Some(e)) -> (string_of_indent depth) ^ (string_of_type ~x:x t) ^ " = " ^ (string_of_expr e)
+  | Assign(x, e) -> (string_of_indent depth) ^ (string_of_expr x) ^ " = " ^ (string_of_expr e)
+  | Exp(e) -> "Exp(" ^ (string_of_expr e) ^ ")"
+  | If(e, s1, s2) -> "If(" ^ (string_of_expr e) ^ ", " ^ (string_of_statement depth s1) ^ " , " ^ (string_of_statement depth s2) ^ ")"
+  | Return(e) -> (string_of_indent depth) ^ "return " ^ (string_of_expr e)
   | Seq(s1, s2) -> "Seq(" ^ (string_of_statement depth s1) ^ (string_of_separator s1) ^ ",\n" ^ (string_of_statement depth s2)  ^ ")"
   | Block([], s) -> "{\n" ^ (string_of_statement (depth + 1) s) ^ ";\n" ^ (string_of_indent depth) ^ "}" 
   | Block(decs, s) -> "{\n" ^ (String.concat ";\n" (List.map (string_of_dec (depth + 1)) decs)) ^ ";\n\n" ^ (string_of_statement (depth + 1) s) ^ ";\n" ^ (string_of_indent depth) ^ "}" 
 and string_of_dec depth = 
   function
   | VarDec((x, t), None) -> (string_of_indent depth) ^ (string_of_type ~x:x t)
-  | VarDec((x, t), Some(e)) -> (string_of_indent depth) ^ (string_of_type ~x:x t) ^ " = " ^ (string_of_exp e)
+  | VarDec((x, t), Some(e)) -> (string_of_indent depth) ^ (string_of_type ~x:x t) ^ " = " ^ (string_of_expr e)
 let string_of_def = 
   function
   | FunDef({ name = Id.L(x); args = yts; body = s; ret = t }, used) when !used ->
@@ -336,8 +336,7 @@ let rec k tenv t =
         t'
     | Type.App(Type.TyFun([], t), []) -> k' local_tenv t
     | Type.App(Type.TyFun(_, _), _) -> assert false (* not implemented. is possible ? *)
-    | Type.Poly([], t) -> k' local_tenv t
-    | Type.Poly _ -> assert false (* not implemented *)
+    | Type.Poly(_, t) -> k' local_tenv t
     | Type.Meta _ -> assert false (* not implemented *)
     | Type.App(Type.NameTycon(x, _), ts) -> CType.NameTy(x, { contents = Some(M.find x local_tenv) })
     | _ -> assert false in
@@ -415,15 +414,14 @@ let cast (e, t) t'=
   | CType.Box -> Deref(Cast(CType.Pointer(t'), CallDir(Var("sp_get"), [e])))
   | t -> Cast(t', e)
       
-let rec pattern env (e, t) p =
-  let _ = D.printf "C.pattern (%s, %s) %s\n" (string_of_exp e) (CType.string_of t) (Closure.string_of_pattern p) in
-  let venv, tenv = env in
+let rec pattern (venv, tenv as env) (e, t) p =
+  let _ = D.printf "C.pattern (%s, %s) %s\n" (string_of_expr e) (CType.string_of t) (Closure.string_of_pattern p) in
   match p with
   | Closure.PtBool(b) -> env, (Eq(cast (e, t) CType.Bool, Bool(b))), (Exp(Nop))
   | Closure.PtInt(n) -> env, (Eq(cast (e, t) CType.Int, Int(n))), (Exp(Nop))
   | Closure.PtVar(x', t') -> 
       let t' = k tenv t' in
-      ((M.add x' t' venv), tenv), (Bool(true)), (Dec((x', t'), Some(cast (e, t) t')))
+      (M.add x' t' venv, tenv), (Bool(true)), (Dec((x', t'), Some(cast (e, t) t')))
   | Closure.PtTuple(ps) -> 
       begin
         match t with
@@ -436,7 +434,7 @@ let rec pattern env (e, t) p =
               (List.combine (List.map (fun (x, t) -> Field(e, x), t) xts) ps)
         | t -> Printf.eprintf "invalid type : %s\n" (string_of_type t); assert false
       end
-  | Closure.PtField(xps) -> 
+  | Closure.PtRecord(xps) -> 
       begin
         match t with
         | CType.NameTy(_, { contents = Some(CType.Struct(_, xts)) }) -> 
@@ -451,7 +449,7 @@ let rec pattern env (e, t) p =
   | Closure.PtConstr(x, []) when M.mem (Id.to_upper x) venv -> env, (Eq(e, Var(Id.to_upper x))), (Exp(Nop))
   | Closure.PtConstr(x, []) -> env, (Eq(Field(e, "type"), Var(Id.to_upper x))), (Exp(Nop))
   | Closure.PtConstr(x, ps) -> 
-      let rec constr_pattern =
+      let rec pattern_constr =
         function
         | CType.Struct(_, ["type", CType.Int; "u", CType.Union(yts)]) ->
             begin
@@ -465,14 +463,12 @@ let rec pattern env (e, t) p =
                     (List.combine (List.map (fun (z, t) -> (Field(Field(Field(e, "u"), x), z)), t) zts) ps)
               | y, t -> Printf.eprintf "invalid type : %s\n" (string_of_type t); assert false
             end
-        | CType.NameTy(_, { contents = Some(t) }) -> constr_pattern t
+        | CType.NameTy(_, { contents = Some(t) }) -> pattern_constr t
         | t -> Printf.eprintf "invalid type : %s\n" (CType.string_of t); assert false in
-      constr_pattern t
+      pattern_constr t
 
-let rec g' env ids e = (* C言語の式生成 (caml2html: c_g) *)
-
-  let _ = D.printf "C.g' %s\n" (Closure.string_of_e e) in
-  let venv, tenv = env in
+let rec g' (venv, tenv as env) ids (e, t) = (* C言語の式生成 (caml2html: c_g) *)
+  let _ = D.printf "C.g' %s\n" (Closure.string_of_expr e) in
 
   let insert_lets es k =
     let rec insert_lets' es k ets' =
@@ -491,6 +487,7 @@ let rec g' env ids e = (* C言語の式生成 (caml2html: c_g) *)
       (fun (e1', _) ->
         insert_let (g' env ids e2) (fun (e2', _) -> f e1' e2', ty)) in
 
+  let e', t' = 
   match e with
   | Closure.Bool(b) -> Bool(b), CType.Bool
   | Closure.Int(i) -> Int(i), CType.Int
@@ -531,8 +528,9 @@ let rec g' env ids e = (* C言語の式生成 (caml2html: c_g) *)
       Var(Id.to_upper x), M.find (Id.to_upper x) venv
   | Closure.Constr(x, es) -> 
       insert_lets es (fun ets' -> CallDir(Var(x), (List.map fst ets')), return_type (M.find x venv))
-  | Closure.App(Closure.Var(x), [y]) when S.mem x !meaningless -> g' env ids y
+  | Closure.App((Closure.Var(x), ft), [y]) when S.mem x !meaningless -> g' env ids y
   | Closure.App(e, ys) -> 
+      let ce = e in
       let rec bind (e, t) ets = 
         function 
         | [] -> 
@@ -545,7 +543,7 @@ let rec g' env ids e = (* C言語の式生成 (caml2html: c_g) *)
               | CType.NameTy(_, { contents = Some(CType.Fun(args, rt)) })
               | CType.Fun(args, rt) ->
                   CallDir(e, List.map2 (fun et t' -> (cast et t')) ets args), rt
-              | t -> Printf.eprintf "invalid type : %s\n" (string_of_type t); assert false
+              | t -> Printf.eprintf "invalid type : %s\n  e = %s\n  Closure.e = %s\n" (string_of_type t) (string_of_expr e) (Closure.string_of_typed_expr ce); assert false
             end
         | e2 :: e2s -> insert_let (g' env ids e2) (fun et' -> bind (e, t) (ets @ [et']) e2s) in
       insert_let (g' env ids e) (fun et' -> bind et' [] ys) (* left-to-right evaluation *)
@@ -563,10 +561,11 @@ let rec g' env ids e = (* C言語の式生成 (caml2html: c_g) *)
         | e2 :: e2s ->
             insert_let (g' env ids e2) (fun et' -> bind (ets @ [et']) e2s) in
       bind [] ys (* left-to-right evaluation *) 
+  in
+  e', t'
         
-let rec g env ids e = (* C言語の文生成 (caml2html: c_g) *)
-  let _ = D.printf "C.g %s\n" (Closure.string_of_exp e) in
-  let venv, tenv = env in
+let rec g (venv, tenv as env) ids (e, t) = (* C言語の文生成 (caml2html: c_g) *)
+  let _ = D.printf "C.g %s\n" (Closure.string_of_term e) in
   match e with 
   | Closure.Unit -> Exp(Nop), CType.Void
   | Closure.Nil(t) -> assert false (* let t = k tenv t in Exp(Nil(t)), t *)
@@ -646,7 +645,7 @@ let constructors =
   | _ -> []
 
 
-let is_meaningless_unwrapper (x, t) e =
+let is_meaningless_unwrapper (x, t) (e, _) =
   match t, e with
   | Type.App(Type.Arrow, [Type.App(Type.Record(x, _), _); Type.App(Type.Record(y, _), _)]), Closure.UnwrapBody _
   | Type.App(Type.Arrow, [Type.Variant(x, _); Type.Variant(y, _)]), Closure.UnwrapBody _ -> true
@@ -663,6 +662,7 @@ let h (venv, tenv as env) def = (* トップレベル定義の C 言語変換 (c
       let body, t' = g ((M.add x (k tenv t) (M.add_list yts (M.add_list zts venv))), tenv) M.empty e in 
       begin
         match t with
+        | Type.Poly(_, Type.App(Type.Arrow, _))
         | Type.App(Type.Arrow, _) ->
             (* 戻り値がクロージャになっているケースがあるので、シグネチャの型ではなく変換後の方を使用する。ただし型環境には変換前の方を入れているので再帰関数については再考が必要 *)
             let body' = block (if (CType.equal t' CType.Void) then body else (insert_return t' body)) in

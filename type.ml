@@ -1,6 +1,6 @@
 type t = (* MinCamlの型を表現するデータ型 (caml2html: type_t) *)
   | Var of tyvar
-  | Field of Id.t * t (* レコードの型名 * フィールドの型 *)
+  | Field of t * t (* レコードの型 * フィールドの型 *)
   | Variant of Id.t * (Id.t * t list) list (* 最初の要素は型名。理由は同上 *)
   | App of tycon * t list
   | Poly of tyvar list * t
@@ -26,7 +26,7 @@ let newmetavar () = ref None
 let rec string_of = 
   function
   | Var(v) -> "Var(" ^ v ^ ")"
-  | Field(tid, t) -> "Field(" ^ tid ^ ", " ^ (string_of t) ^ ")"
+  | Field(tid, t) -> "Field(" ^ (string_of tid) ^ ", " ^ (string_of t) ^ ")"
   | Variant(x, ytss) -> "Variant(" ^ x ^ ", " ^
       (String.concat " | " 
          (List.map 
@@ -91,7 +91,7 @@ let rec ocaml_of =
   | App(Record(_, xs), ys) -> 
       "{" ^ (String.concat ";" 
                (List.map (fun (x, y) -> x ^ " = " ^ (ocaml_of y)) (List.combine xs ys))) ^ "}"
-  | Poly([], t) -> ocaml_of t      
+  | Poly(xs, t) -> ocaml_of t      
   | App(TyFun([], t), []) -> ocaml_of t
   | App(NameTycon(x, _), ts) -> (String.concat " * " (List.map ocaml_of ts)) ^ " " ^ x
   | t -> Printf.eprintf "%s : not implemented yet." (string_of t); assert false
@@ -102,13 +102,14 @@ let rec equal t1 t2 =
   | App(Unit, xs), App(Unit, ys) 
   | App(Bool, xs), App(Bool, ys) 
   | App(Int, xs), App(Int, ys) 
-  | App(Arrow, xs), App(Arrow, ys) when List.length xs = List.length ys -> List.for_all2 equal xs ys
+  | App(Arrow, xs), App(Arrow, ys) 
+  | App(Tuple, xs), App(Tuple, ys) when List.length xs = List.length ys -> List.for_all2 equal xs ys
   | App(Record(x, _), xs), App(Record(y, _), ys) when List.length xs = List.length ys -> x = y && List.for_all2 equal xs ys
   | App(TyFun(xs, u), ys), t2 -> assert false (* inpossible after Typing.f *)
   | Poly([], u1), t2 -> equal u1 t2
   | t1, Poly([], u2) -> equal t1 u2
-  | Poly(xs, u1), Poly(ys, u2) -> assert false (* inpossible after Typing.f *) 
-  | Var(x), Var(y) when x = y -> true
+  | Poly(xs, u1), Poly(ys, u2) -> xs = ys && equal u1 u2
+  | Var(x), Var(y) -> true
   | Field(_, x), Field(_, y) -> equal x y
   | Variant(x, _), Variant(y, _) -> x = y
   | Meta{ contents = Some(t1') }, t2 -> equal t1' t2
@@ -143,7 +144,7 @@ let rec tycons t =
 let rec types t =
   let () = D.printf "Types.types %s\n" (string_of_tycon t) in
   match t with
-  | TyFun(xs, App(Record(x, fs), ys)) -> (List.combine fs (List.map (fun y -> (Poly(xs, Field(x, y))))  ys))
+  | TyFun(xs, (App(Record(x, fs), ys) as t)) -> (List.combine fs (List.map (fun y -> (Poly(xs, Field(t, y))))  ys))
   | _ -> []
 
 let rec name t =

@@ -1,8 +1,8 @@
 %{
 (* parserが利用する変数、関数、型などの定義 *)
 open Syntax
-let addtyp x = (x, Type.Meta(Type.newmetavar ()))
-let constr_args = function Tuple(xs) -> xs | x -> [x]
+let add_type x = (x, Type.Meta(Type.newmetavar ()))
+let constr_args = function Tuple(xs), _ -> xs | x, t -> [(x, t)]
 let constr_pattern_args = function PtTuple(xs) -> xs | x -> [x]
 
 %}
@@ -89,7 +89,7 @@ definitions:
 definition:
 | LET IDENT EQUAL seq_expr
     %prec prec_let
-    { VarDef(addtyp $2, $4) }
+    { VarDef(add_type $2, $4) }
 | LET LPAREN RPAREN EQUAL seq_expr
     %prec prec_let
     { VarDef((Id.gentmp (Type.prefix (Type.App(Type.Unit, []))), (Type.App(Type.Unit, []))), $5) }
@@ -109,78 +109,78 @@ simple_expr: /* 括弧をつけなくても関数の引数になれる式 (caml2
 | BEGIN seq_expr END
     { $2 }
 | LPAREN RPAREN
-    { Unit }
+    { add_type Unit }
 | BEGIN END
-    { Unit }
+    { add_type Unit }
 | BOOL
-    { Bool($1) }
+    { add_type (Bool($1)) }
 | INT
-    { Int($1) }
+    { add_type (Int($1)) }
 | IDENT
-    { Var($1) }
+    { add_type (Var($1)) }
 | UIDENT
-    { Constr($1, []) }
+    { add_type (Constr($1, [])) }
 | simple_expr DOT IDENT
-    { Field($1, $3) }
+    { add_type (Field($1, $3)) }
 | LSQUARE_BRANKET list RSQUARE_BRANKET
-    { List.fold_right (fun x xs -> Cons(x, xs)) $2 (Nil(Type.Meta(Type.newmetavar ()))) }
+    { List.fold_right (fun x xs -> add_type (Cons(x, xs))) $2 (add_type (Nil(Type.Meta(Type.newmetavar ())))) }
 ;
 expr: /* 一般の式 (caml2html: parser_expr) */
 | simple_expr
     { $1 }
 | NOT expr
     %prec prec_app
-    { Not($2) }
+    { add_type (Not($2)) }
 | MINUS expr
     %prec prec_unary_minus
-    { Neg($2) }
+    { add_type (Neg($2)) }
 | expr PLUS expr /* 足し算を構文解析するルール (caml2html: parser_add) */
-    { Add($1, $3) }
+    { add_type (Add($1, $3)) }
 | expr MINUS expr
-    { Sub($1, $3) }
+    { add_type (Sub($1, $3)) }
 | expr AST expr
-    { Mul($1, $3) }
+    { add_type (Mul($1, $3)) }
 | expr SLASH expr
-    { Div($1, $3) }
+    { add_type (Div($1, $3)) }
 | expr CONS expr
-    { Cons($1, $3) }
+    { add_type (Cons($1, $3)) }
 | expr LAND expr
-    { And($1, $3) }
+    { add_type (And($1, $3)) }
 | expr LOR expr
-    { Or($1, $3) }
+    { add_type (Or($1, $3)) }
 | expr EQUAL expr
-    { Eq($1, $3) }
+    { add_type (Eq($1, $3)) }
 | expr LESS_GREATER expr
-    { Not(Eq($1, $3)) }
+    { add_type (Not(add_type (Eq($1, $3)))) }
 | expr LESS expr
-    { Not(LE($3, $1)) }
+    { add_type (Not(add_type (LE($3, $1)))) }
 | expr GREATER expr
-    { Not(LE($1, $3)) }
+    { add_type (Not(add_type (LE($1, $3)))) }
 | expr LESS_EQUAL expr
-    { LE($1, $3) }
+    { add_type (LE($1, $3)) }
 | expr GREATER_EQUAL expr
-    { LE($3, $1) }
+    { add_type (LE($3, $1)) }
 | tuple
-    { Tuple(List.rev $1) }
+    { add_type (Tuple(List.rev $1)) }
 | IF expr THEN expr ELSE expr
     %prec prec_if
-    { If($2, $4, $6) }
+    { add_type (If($2, $4, $6)) }
 | expr actual_args
     %prec prec_app
-    { App($1, $2) }
+    { add_type (App($1, $2)) }
 | UIDENT simple_expr
-    { Constr($1, constr_args $2) }
+    { add_type (Constr($1, constr_args $2)) }
 | LBRACE fields RBRACE
-    { Record($2) }
+    { add_type (Record($2)) }
 | LET IDENT EQUAL seq_expr IN seq_expr
     %prec prec_let
-    { LetVar(addtyp $2, $4, $6) }
+    { add_type (LetVar(add_type $2, $4, $6)) }
 | LET REC fundef IN seq_expr
     %prec prec_let
-    { LetRec($3, $5) }
+    { add_type (LetRec($3, $5)) }
 | MATCH expr WITH pattern_matching
     %prec prec_match
-    { Match($2, $4) }
+    { add_type (Match($2, $4)) }
 | error
     { failwith
 	(Printf.sprintf "parse error near characters %d-%d"
@@ -192,7 +192,7 @@ seq_expr:
 | expr
     { $1 }
 | expr SEMICOLON seq_expr
-    { LetVar((Id.gentmp (Type.prefix (Type.App(Type.Unit, []))), (Type.App(Type.Unit, []))), $1, $3) }
+    { add_type (LetVar((Id.gentmp (Type.prefix (Type.App(Type.Unit, []))), (Type.App(Type.Unit, []))), $1, $3)) }
 ;    
 
 tuple:
@@ -204,14 +204,14 @@ tuple:
 
 fundef:
 | IDENT formal_args EQUAL seq_expr
-    { { name = addtyp $1; args = $2; body = $4 } }
+    { { name = add_type $1; args = $2; body = $4 } }
 ;
 
 formal_args:
 | IDENT formal_args
-    { addtyp $1 :: $2 }
+    { add_type $1 :: $2 }
 | IDENT
-    { [addtyp $1] }
+    { [add_type $1] }
 ;
 
 actual_args:
@@ -267,7 +267,7 @@ pattern:
 | tuple_pattern
     { PtTuple(List.rev $1) }
 | LBRACE field_patterns RBRACE
-    { PtField(List.rev $2) }
+    { PtRecord(List.rev $2) }
 | UIDENT 
     { PtConstr($1, []) }
 | UIDENT pattern

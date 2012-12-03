@@ -1,6 +1,10 @@
 type 'a ref = { contents : 'a }
 
 let () = 
+(*
+  let rec id x = x in
+  let f = { contents = id } in
+*)
   let n = { contents = 10 } in
   let b = { contents = true } in
   print_int n.contents;

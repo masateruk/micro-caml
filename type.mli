@@ -1,6 +1,6 @@
 type t = 
   | Var of tyvar 
-  | Field of Id.t * t
+  | Field of t * t
   | Variant of Id.t * (Id.t * t list) list
   | App of tycon * t list 
   | Poly of tyvar list * t

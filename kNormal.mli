@@ -1,4 +1,6 @@
-type t =
+type t = (* K正規化後の式 (caml2html: knormal_t) *)
+    term * Type.t
+and term =
   | Unit
   | Nil of Type.t
   | Exp of e
@@ -9,7 +11,9 @@ type t =
   | LetRec of fundef * t
   | WrapBody of Id.t * Type.t
   | UnwrapBody of Id.t * Type.t
-and e =
+and e = 
+    expr * Type.t
+and expr =
   | Bool of bool
   | Int of int
   | Record of (Id.t * e) list
@@ -42,7 +46,9 @@ and def =
   | VarDef of (Id.t * Type.t) * t
   | RecDef of fundef
 val f : Syntax.def list -> def list
-val ocaml_of_e : e -> Id.t
-val ocaml_of_t : t -> Id.t
+val string_of_typed_expr : e -> Id.t
+val string_of_expr : expr -> Id.t
+val string_of_typed_term : t -> Id.t
+val string_of_term : term -> Id.t
 val fold : ('a * 'b list -> 'c -> 'a * 'b list) -> 'a -> 'c list -> 'b list
 val map : (Env.t -> def -> 'a) -> def list -> 'a list
