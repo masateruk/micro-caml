@@ -347,12 +347,12 @@ let rec translate_tycon tenv =
   | Type.TyFun(_, t) -> k tenv t (* 型変数が残っていてもBoxに変換するため、型引数は無視できる *)
   | t -> Printf.eprintf "invalid type constructor : t = %s\n" (Type.string_of_tycon t); assert false
       
-let find_closure_type yts t = find_name_type (CType.Struct("", ("f", t) :: yts))
+let find_closure_type yts t = find_name_type (CType.Struct("", ("_f", t) :: yts))
   
 let rec closure_type yts t = 
   match t with
   | CType.Fun(args, ret) -> 
-      let name = (Id.genid "closure") ^ "_t" in name, CType.Struct("", ("f", t) :: yts)
+      let name = (Id.genid "closure") ^ "_t" in name, CType.Struct("", ("_f", t) :: yts)
   | _ -> Printf.eprintf "invalid type : %s\n" (string_of_type t); assert false
     
 (* 改名。改名マップに ID.t があれば改名後の名前を返す。なければ、元の名前を返す。*)      
@@ -408,14 +408,16 @@ let rec translate_if (s, t) =
       end
   | _ -> Printf.eprintf "invalid statement : %s\n" (string_of_statement 0 s); assert false
 
-let cast (e, t) t'=
-  match t with
-  | t when CType.equal t t' -> e
-  | CType.Box -> Deref(Cast(CType.Pointer(t'), CallDir(Var("sp_get"), [e])))
-  | t -> Cast(t', e)
-      
 let rec pattern (venv, tenv as env) (e, t) p =
   let _ = D.printf "C.pattern (%s, %s) %s\n" (string_of_expr e) (CType.string_of t) (Closure.string_of_pattern p) in
+
+  (* cast が必要なのはパターンマッチ内でバリアント型の型変数の属性にアクセスするときだけなのでグローバル関数にしない *)
+  let cast (e, t) t'=
+    match t with
+    | t when CType.equal t t' -> e
+    | CType.Box -> Deref(Cast(CType.Pointer(t'), CallDir(Var("sp_get"), [e])))
+    | t -> Cast(t', e) in
+
   match p with
   | Closure.PtBool(b) -> env, (Eq(cast (e, t) CType.Bool, Bool(b))), (Exp(Nop))
   | Closure.PtInt(n) -> env, (Eq(cast (e, t) CType.Int, Int(n))), (Exp(Nop))
@@ -512,7 +514,7 @@ let rec g' (venv, tenv as env) ids (e, t) = (* C言語の式生成 (caml2html: c
   | Closure.Field(e, x) -> 
       insert_let (g' env ids e) (fun (e, t) -> 
         let st = find_struct_by_field x in
-        Field(cast (e, t) st, x), field_type st x)
+        Field(e, x), field_type st x)
   | Closure.Tuple(es) -> 
       insert_lets es (fun ets -> 
         let t = name_type (CType.Struct("", List.map (fun (_, t) -> (gentmp t), t) ets)) in (* namety 関数で名前付き構造体型をひく *)
@@ -542,7 +544,7 @@ let rec g' (venv, tenv as env) ids (e, t) = (* C言語の式生成 (caml2html: c
                   CallDir(Var(applyer_name t), e :: (List.map fst ets)), rt
               | CType.NameTy(_, { contents = Some(CType.Fun(args, rt)) })
               | CType.Fun(args, rt) ->
-                  CallDir(e, List.map2 (fun et t' -> (cast et t')) ets args), rt
+                  CallDir(e, List.map2 (fun (e, t) t' -> e) ets args), rt
               | t -> Printf.eprintf "invalid type : %s\n  e = %s\n  Closure.e = %s\n" (string_of_type t) (string_of_expr e) (Closure.string_of_typed_expr ce); assert false
             end
         | e2 :: e2s -> insert_let (g' env ids e2) (fun et' -> bind (e, t) (ets @ [et']) e2s) in
@@ -555,7 +557,7 @@ let rec g' (venv, tenv as env) ids (e, t) = (* C言語の式生成 (caml2html: c
               match (M.find l venv) with
               | CType.NameTy(_, { contents = Some(CType.Fun(args, rt)) })
               | CType.Fun(args, rt) ->
-                  CallDir(Var(l), List.map2 (fun et t' -> (cast et t')) ets args), rt
+                  CallDir(Var(l), List.map2 (fun (e, t) t' -> e) ets args), rt
               | t -> Printf.eprintf "invalid type : %s\n" (string_of_type t); assert false
             end
         | e2 :: e2s ->
@@ -579,7 +581,7 @@ let rec g (venv, tenv as env) ids (e, t) = (* C言語の文生成 (caml2html: c_
         let (s1, t1) = (g env ids e1) in
         let (s2, t2) = (g env ids e2) in
         assert (CType.equal t1 t2);
-        translate_if (If(cast et' CType.Bool, s1, s2), t1))
+        translate_if (If(fst et', s1, s2), t1))
   | Closure.Match(x, pes) ->
       translate_if 
         (List.fold_right

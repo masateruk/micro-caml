@@ -11,7 +11,7 @@ let rec subst ({ Env.tycons = tycons } as env) tyvars t =
     function
     | Type.Var(x) when M.mem x tyvars -> M.find x tyvars
     | Type.Var(x) -> Type.Var(x)
-    | Type.Field(tid, t) -> Type.Field(tid, subst' t)
+    | Type.Field(tr, t) -> Type.Field(subst' tr, subst' t)
     | Type.Variant(x, ytts) -> Type.Variant(x, (List.map (fun (y, ts) -> y, List.map subst' ts) ytts))
     | Type.App(Type.TyFun(xs, t), ys) -> subst' (subst env (M.add_list2 xs ys M.empty) t)
     | Type.App(Type.NameTycon(x, _), ys) -> subst' (Type.App(M.find x tycons, ys))
@@ -24,12 +24,14 @@ let rec subst ({ Env.tycons = tycons } as env) tyvars t =
     
 let rec occur x = (* occur check (caml2html: typing_occur) *)
   function 
+  | Type.Var _ -> false
+  | Type.Field(_, t) -> occur x t
+  | Type.Variant(_, xtss) -> List.exists (fun (_, ts) -> (List.exists (occur x) ts)) xtss
   | Type.App(Type.TyFun(_, u), ts) -> occur x u || List.exists (occur x) ts
   | Type.App(_, ts) -> List.exists (occur x) ts
   | Type.Poly(_, t) -> occur x t
   | Type.Meta{ contents = Some(t) } -> occur x t
   | Type.Meta(y) -> x == y
-  | _ -> false
       
 let rec unify ({ Env.tycons = tycons } as env) t1 t2 = (* 型が合うように、メタ型変数への代入をする. 成功したら () を返す. (caml2html: typing_unify) *)
   let _ = D.printf "    Typing.unify %s %s\n" (Type.string_of t1) (Type.string_of t2) in
@@ -49,8 +51,7 @@ let rec unify ({ Env.tycons = tycons } as env) t1 t2 = (* 型が合うように�
     | t1, Type.Poly([], u2) -> unify' t1 u2
     | Type.Poly(xs, u1), Type.Poly(ys, u2) -> unify' u1 (subst env (M.add_list2 ys (List.map (fun x -> Type.Var(x)) xs) M.empty) u2)
     | Type.Var(x), Type.Var(y) when x = y -> ()
-    | Type.Field(_, t1'), t2 -> unify' t1' t2
-    | t1, Type.Field(_, t2') -> unify' t1 t2'
+    | Type.Field(rt1, t1), Type.Field(rt2, t2) -> unify' rt1 rt2; unify' t1 t2
     | Type.Variant(x, xtss), Type.Variant(y, ytss) when x = y -> List.iter2 (fun (_, xs) (_, ys) -> List.iter2 unify' xs ys) xtss ytss
     | Type.Meta{ contents = Some(t1') }, t2 -> unify' t1' t2
     | Type.Meta(x), Type.Meta{ contents = Some(t2') } -> unify' t1 t2'
@@ -60,6 +61,7 @@ let rec unify ({ Env.tycons = tycons } as env) t1 t2 = (* 型が合うように�
         else x := Some(t2)
     | t1, Type.Meta(y) -> unify' t2 t1
     | _, _ -> 
+        D.printf "unify failed.\n  t1 = %s\n  t2 = %s\n" (Type.string_of t1) (Type.string_of t2);
         raise (Unify(t1, t2)) in
   unify' t1 t2
     
@@ -157,7 +159,8 @@ let rec deref_pattern env =
 
 let rec deref_id_type env (x, t) = (x, deref_type env t)
 
-let rec deref_typed_expr ({ Env.venv = venv } as env) (e, t) = (deref_expr env e, deref_type env t)
+let rec deref_typed_expr ({ Env.venv = venv } as env) (e, t) = 
+  (deref_expr env e, deref_type env t)
 
 and deref_expr ({ Env.venv = venv } as env) =
   function
