@@ -55,12 +55,12 @@ let rec string_of_pattern =
   function
   | PtBool(b) -> "PtBool(" ^ (string_of_bool b) ^ ")"
   | PtInt(n) -> "PtInt(" ^ (string_of_int n) ^ ")"
-  | PtVar(x, t) -> "PtVar(" ^ x ^ "," ^ (Type.string_of t) ^ ")"
+  | PtVar(x, t) -> "PtVar(" ^ x ^ "," ^ (Type.string_of_t t) ^ ")"
   | PtTuple(ps) -> "PtTuple([" ^ (String.concat "; " (List.map string_of_pattern ps)) ^ "])"
   | PtRecord(xps) -> "PtRecord([" ^ (String.concat "; " (List.map (fun (x, p) -> x ^ ", " ^ (string_of_pattern p)) xps)) ^ "])"
   | PtConstr(x, ps) -> "PtConstr(" ^ x ^ ", [" ^ (String.concat "; " (List.map string_of_pattern ps)) ^ "])"
 
-let rec string_of_typed_expr (e, t) = (string_of_expr e) ^ " : " ^ (Type.string_of t)
+let rec string_of_typed_expr (e, t) = (string_of_expr e) ^ " : " ^ (Type.string_of_t t)
 
 and string_of_expr = 
   function
@@ -84,20 +84,20 @@ and string_of_expr =
   | App(e, args) -> "App(" ^ (string_of_typed_expr e) ^ ", [" ^ (String.concat "; " (List.map string_of_typed_expr args)) ^ "])"
   | AppDir(Id.L(x), args) -> x ^ " " ^ (String.concat " " (List.map string_of_typed_expr args))
       
-let rec string_of_typed_term (e, t) = (string_of_term e) ^ " : " ^ (Type.string_of t)
+let rec string_of_typed_term (e, t) = (string_of_term e) ^ " : " ^ (Type.string_of_t t)
 
 and string_of_term = 
   function
   | Unit -> "Unit"
-  | Nil(t) -> "Nil(" ^ (Type.string_of t) ^ ")"
-  | WrapBody(x, t) -> "WrapBody(" ^ x ^ ", " ^ (Type.string_of t) ^ ")"
-  | UnwrapBody(x, t) -> "UnwrapBody(" ^ x ^ ", " ^ (Type.string_of t) ^ ")"
+  | Nil(t) -> "Nil(" ^ (Type.string_of_t t) ^ ")"
+  | WrapBody(x, t) -> "WrapBody(" ^ x ^ ", " ^ (Type.string_of_t t) ^ ")"
+  | UnwrapBody(x, t) -> "UnwrapBody(" ^ x ^ ", " ^ (Type.string_of_t t) ^ ")"
   | Exp(e) -> "Exp(" ^ (string_of_typed_expr e) ^ ")"
   | Cons(s1, s2) -> assert false
   | If(e1, e2, e3) -> "If(" ^ (string_of_typed_expr e1) ^ " then " ^ (string_of_typed_term e2) ^ " else " ^ (string_of_typed_term e3) ^ ")"
   | Match(x, pes) -> "Match(" ^ x ^ ", [" ^ (String.concat "; " (List.map (fun (p, e) -> (string_of_pattern p) ^ " -> " ^ (string_of_typed_term e)) pes)) ^ "])"
-  | Let((x, t), e1, e2) -> "LetVar(" ^ x ^ " : " ^ (Type.string_of t) ^ " = " ^ (string_of_typed_term e1) ^ " in " ^ (string_of_typed_term e2) ^ ")"
-  | MakeCls((x, t), { entry = Id.L(l); actual_fv = ys }, e) -> "MakeCls(" ^ x ^ " : " ^ (Type.string_of t) ^ " = " ^ l ^ " [" ^ (String.concat ", " ys) ^ "] in " ^ (string_of_typed_term e) ^ ")"
+  | Let((x, t), e1, e2) -> "LetVar(" ^ x ^ " : " ^ (Type.string_of_t t) ^ " = " ^ (string_of_typed_term e1) ^ " in " ^ (string_of_typed_term e2) ^ ")"
+  | MakeCls((x, t), { entry = Id.L(l); actual_fv = ys }, e) -> "MakeCls(" ^ x ^ " : " ^ (Type.string_of_t t) ^ " = " ^ l ^ " [" ^ (String.concat ", " ys) ^ "] in " ^ (string_of_typed_term e) ^ ")"
       
 let string_of_fundef { name = (Id.L(x), t); args = yts; formal_fv = zts; body = e } =
   "\nlet rec " ^ x ^ " " ^ (String.concat " " (List.map (fun (y, t) -> y) (yts @ zts))) ^ (* " : " ^ (Id.string_of_typ t) ^ *) " = " ^ (string_of_typed_term e) 
@@ -105,7 +105,7 @@ let string_of_fundef { name = (Id.L(x), t); args = yts; formal_fv = zts; body = 
 let rec string_of_def = 
   function
   | TypeDef(x, t) -> "TypeDef(" ^ x ^ ", " ^ (Type.string_of_tycon t) ^ ")"
-  | VarDef((x, t), e) -> "VarDef((" ^ x ^ ", " ^ (Type.string_of t) ^ "), " ^ (string_of_typed_term e) ^ ")"
+  | VarDef((x, t), e) -> "VarDef((" ^ x ^ ", " ^ (Type.string_of_t t) ^ "), " ^ (string_of_typed_term e) ^ ")"
   | FunDef(fundef) -> "FunDef(" ^ (string_of_fundef fundef) ^ ")"
 
 let rec vars_of_pattern = 

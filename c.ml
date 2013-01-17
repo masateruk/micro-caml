@@ -268,22 +268,22 @@ let rec return_type =
   | _ -> assert false
       
 (* 型変換 *)
-let rec k tenv t = 
-  let _ = D.printf "C.k %s\n" (Type.string_of t) in
-  let rec k' local_tenv t =
+let rec translate_type tenv t = 
+  let _ = D.printf "C.translate_type %s\n" (Type.string_of_t t) in
+  let rec trans_type local_tenv t =
     match t with
     | Type.Var _ -> CType.Box
     | Type.App(Type.Unit, []) -> CType.Void
     | Type.App(Type.Bool, []) -> CType.Bool
     | Type.App(Type.Int, []) -> CType.Int
-    | Type.App(Type.Tuple, ts) -> named_type (CType.Struct(Type.name t, List.map (fun t -> let t' = k' local_tenv t in (gentmp t'), t') ts)) (* Tuple型には名前をつける *)
-    | Type.App(Type.Arrow, ts) -> named_type (CType.Fun(List.map (k' local_tenv) (L.init ts), k' local_tenv (L.last ts))) (* Fun型には名前をつける *)
+    | Type.App(Type.Tuple, ts) -> named_type (CType.Struct(Type.name t, List.map (fun t -> let t' = trans_type local_tenv t in (gentmp t'), t') ts)) (* Tuple型には名前をつける *)
+    | Type.App(Type.Arrow, ts) -> named_type (CType.Fun(List.map (trans_type local_tenv) (L.init ts), trans_type local_tenv (L.last ts))) (* Fun型には名前をつける *)
     | Type.App(Type.Record(x, _), _) when M.mem x tenv -> 
         CType.NameTy(x, { contents = Some(M.find x tenv) }) (* すでに型環境に定義がある場合は名前型を返す *)
     | Type.App(Type.Record(x, _), _) when M.mem x local_tenv -> assert false (* TBD ローカル型環境にある場合は struct タグ名* で参照する *)
     | Type.App(Type.Record(x, ys), ts) -> 
         let r = ref None in
-        let t' = CType.Struct(x, List.combine ys (List.map (k' (M.add x (CType.NameTy(x, r)) local_tenv)) ts)) in
+        let t' = CType.Struct(x, List.combine ys (List.map (trans_type (M.add x (CType.NameTy(x, r)) local_tenv)) ts)) in
         r := Some(t');
         t'
     | Type.Variant(x, _) when M.mem x tenv -> CType.NameTy(x, { contents = Some(M.find x tenv) })
@@ -294,7 +294,7 @@ let rec k tenv t =
           (fun (y, ts) -> 
             (match ts with
             | [] -> None
-            | ts -> Some(CType.Struct(y, List.map (fun t -> let t' = k' (M.add x (CType.NameTy(x, r)) local_tenv) t in gentmp t', t') ts)))) ytss in
+            | ts -> Some(CType.Struct(y, List.map (fun t -> let t' = trans_type (M.add x (CType.NameTy(x, r)) local_tenv) t in gentmp t', t') ts)))) ytss in
         let yts' = List.fold_left2 (fun ts y t -> match t with None -> (y, CType.Pseudo) :: ts | Some(t) -> (y, t) :: ts) [] ys ts' in
         let t' = 
           if (List.for_all (function CType.Pseudo -> true | _ -> false) (List.map snd yts')) 
@@ -303,17 +303,17 @@ let rec k tenv t =
                 CType.Struct(x, ["type", CType.Int; "u", CType.Union(yts')])) in
         r := Some(t');
         t'
-    | Type.App(Type.TyFun([], t), []) -> k' local_tenv t
+    | Type.App(Type.TyFun([], t), []) -> trans_type local_tenv t
     | Type.App(Type.TyFun(_, _), _) -> assert false (* not implemented. is possible ? *)
-    | Type.Poly(_, t) -> k' local_tenv t
+    | Type.Poly(_, t) -> trans_type local_tenv t
     | Type.Meta _ -> assert false (* not implemented *)
     | Type.App(Type.NameTycon(x, _), ts) -> CType.NameTy(x, { contents = Some(M.find x local_tenv) })
     | _ -> assert false in
-  k' M.empty t
+  trans_type M.empty t
 
 let rec translate_tycon tenv = 
   function
-  | Type.TyFun(_, t) -> k tenv t (* 型変数が残っていてもBoxに変換するため、型引数は無視できる *)
+  | Type.TyFun(_, t) -> translate_type tenv t (* 型変数が残っていてもBoxに変換するため、型引数は無視できる *)
   | t -> Printf.eprintf "invalid type constructor : t = %s\n" (Type.string_of_tycon t); assert false
       
 (* 改名。改名マップに ID.t があれば改名後の名前を返す。なければ、元の名前を返す。*)      
@@ -435,7 +435,7 @@ let rec translate_if (s, t) =
   | _ -> Printf.eprintf "invalid statement : %s\n" (string_of_statement 0 s); assert false
 
 let rec pattern (venv, tenv as env) (e, t) p =
-  let _ = D.printf "C.pattern (%s, %s) %s\n" (string_of_expr e) (CType.string_of t) (Closure.string_of_pattern p) in
+  let _ = D.printf "C.pattern (%s, %s) %s\n" (string_of_expr e) (CType.string_of_t t) (Closure.string_of_pattern p) in
 
   (* cast が必要なのはパターンマッチ内でバリアント型の型変数の属性にアクセスするときだけなのでグローバル関数にしない *)
   let cast (e, t) t'=
@@ -448,7 +448,7 @@ let rec pattern (venv, tenv as env) (e, t) p =
   | Closure.PtBool(b) -> env, (Eq(cast (e, t) CType.Bool, Bool(b))), (Exp(Nop))
   | Closure.PtInt(n) -> env, (Eq(cast (e, t) CType.Int, Int(n))), (Exp(Nop))
   | Closure.PtVar(x', t') -> 
-      let t' = k tenv t' in
+      let t' = translate_type tenv t' in
       (M.add x' t' venv, tenv), (Bool(true)), (Dec((x', t'), Some(cast (e, t) t')))
   | Closure.PtTuple(ps) -> 
       begin
@@ -492,7 +492,7 @@ let rec pattern (venv, tenv as env) (e, t) p =
               | y, t -> Printf.eprintf "invalid type : %s\n" (string_of_type t); assert false
             end
         | CType.NameTy(_, { contents = Some(t) }) -> pattern_constr t
-        | t -> Printf.eprintf "invalid type : %s\n" (CType.string_of t); assert false in
+        | t -> Printf.eprintf "invalid type : %s\n" (CType.string_of_t t); assert false in
       pattern_constr t
 
 let rec g' (venv, tenv as env) ids (e, t) = (* C言語の式生成 (caml2html: c_g) *)
@@ -597,8 +597,8 @@ let rec g (venv, tenv as env) ids (e, t) = (* C言語の文生成 (caml2html: c_
   | Closure.Unit -> Exp(Nop), CType.Void
   | Closure.Nil(t) -> assert false (* let t = k tenv t in Exp(Nil(t)), t *)
   | Closure.Cons(x, y) -> assert false (* not implemented *)
-  | Closure.WrapBody(x, t) -> wrap_body x (k tenv t), CType.Box
-  | Closure.UnwrapBody(x, t) -> let t' = k tenv t in unwrap_body x t', t'
+  | Closure.WrapBody(x, t) -> wrap_body x (translate_type tenv t), CType.Box
+  | Closure.UnwrapBody(x, t) -> let t' = translate_type tenv t in unwrap_body x t', t'
   | Closure.Exp(e) -> 
       insert_dec (g' env ids e) (fun (e', t') -> Exp(e'), t')
   | Closure.If(e, e1, e2) -> 
@@ -673,9 +673,9 @@ let h (venv, tenv as env) def = (* トップレベル定義の C 言語変換 (c
   | Closure.FunDef({ Closure.name = (Id.L(x), t); Closure.args = yts; Closure.formal_fv = zts; Closure.body = e }) ->
       if is_meaningless_unwrapper (x, t) e then (meaningless := S.add x !meaningless; env)
       else
-      let yts = List.map (fun (y, t) -> (y, k tenv t)) yts in
-      let zts = List.map (fun (z, t) -> (z, k tenv t)) zts in
-      let body, t' = g ((M.add x (k tenv t) (M.add_list yts (M.add_list zts venv))), tenv) M.empty e in 
+      let yts = List.map (fun (y, t) -> (y, translate_type tenv t)) yts in
+      let zts = List.map (fun (z, t) -> (z, translate_type tenv t)) zts in
+      let body, t' = g ((M.add x (translate_type tenv t) (M.add_list yts (M.add_list zts venv))), tenv) M.empty e in 
       begin
         match t with
         | Type.Poly(_, Type.App(Type.Arrow, _))
@@ -685,12 +685,12 @@ let h (venv, tenv as env) def = (* トップレベル定義の C 言語変換 (c
             let def = FunDef({ name = Id.L(x); args = yts @ zts; body = body'; ret = t' }, ref false) in
             toplevel := def :: !toplevel; 
             (M.add x (CType.Fun(List.map snd (yts @ zts), t')) venv), tenv
-        | _ -> Printf.eprintf "invalid type : %s\n" (Type.string_of t); assert false
+        | _ -> Printf.eprintf "invalid type : %s\n" (Type.string_of_t t); assert false
       end
   | Closure.VarDef((x, t), e) -> 
-      let def = VarDef((x, k tenv t), fst (g (venv, tenv) M.empty e)) in
+      let def = VarDef((x, translate_type tenv t), fst (g (venv, tenv) M.empty e)) in
       toplevel := def :: !toplevel; 
-      (M.add x (k tenv t) venv), tenv
+      (M.add x (translate_type tenv t) venv), tenv
   | Closure.TypeDef(x, t) -> 
       let t' = translate_tycon tenv t in
       let constrs = constructors t' in
@@ -703,7 +703,7 @@ let h (venv, tenv as env) def = (* トップレベル定義の C 言語変換 (c
 let f (Closure.Prog(defs)) =
   let () = D.printf "\nC.f \n%s\n" (String.concat "\n" (List.map Closure.string_of_def defs)) in
   (* 型変換の k で toplevel に TypeDef を追加する可能性があるので、必ず k の結果を let で束縛してから toplevel を評価すること *)
-  let venv = (M.map (k M.empty) !Env.extenv) in
+  let venv = (M.map (translate_type M.empty) !Env.extenv) in
   let env' = List.fold_left h (venv, M.empty) (L.init defs) in
   let e = 
     match (L.last defs) with 

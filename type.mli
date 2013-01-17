@@ -19,7 +19,7 @@ and metavar = Id.t
 val counter : int ref
 val newtyvar : unit -> Id.t
 val newmetavar : unit -> t option ref
-val string_of : t -> Id.t
+val string_of_t : t -> Id.t
 val string_of_tycon : tycon -> Id.t
 val prefix : t -> Id.t
 val ocaml_of : t -> Id.t

@@ -11,29 +11,29 @@ type t =
   | Pointer of t
   | Pseudo
 
-let rec string_of reached t = 
+let rec string_of_t reached t = 
   match t with
   | Void -> "Void" 
   | Bool -> "Bool" 
   | Int -> "Int" 
   | Enum(x, ys) -> "Enum(" ^ x ^ ", [" ^ (String.concat "," ys) ^ "])"
-  | Fun(args, ret) -> (string_of (t ::reached) ret) ^ " (*)(" ^ (String.concat ", " (List.map (string_of (t ::reached)) args)) ^ ")" 
+  | Fun(args, ret) -> (string_of_t (t ::reached) ret) ^ " (*)(" ^ (String.concat ", " (List.map (string_of_t (t ::reached)) args)) ^ ")" 
   | Struct(tag, _) when List.mem t reached -> "Struct " ^ tag
   | Struct(tag, xts) -> 
       "Struct " ^ tag ^ " (" ^ 
-        (String.concat ", " (List.map (fun (x, t') -> x ^ " : " ^ (string_of (t ::reached) t')) xts)) ^ 
+        (String.concat ", " (List.map (fun (x, t') -> x ^ " : " ^ (string_of_t (t ::reached) t')) xts)) ^ 
         ")" 
   | Union(xts) -> 
       "Union (" ^ 
-        (String.concat ", " (List.map (fun (x, t') -> x ^ " : " ^ (string_of (t ::reached) t')) xts)) ^ 
+        (String.concat ", " (List.map (fun (x, t') -> x ^ " : " ^ (string_of_t (t ::reached) t')) xts)) ^ 
         ")" 
-  | NameTy(x, { contents = Some(t') }) -> "NameTy(" ^ x ^ ", Some(" ^ (string_of (t ::reached) t') ^ "))"
+  | NameTy(x, { contents = Some(t') }) -> "NameTy(" ^ x ^ ", Some(" ^ (string_of_t (t ::reached) t') ^ "))"
   | NameTy(x, _) -> "NameTy(" ^ x ^ ", None)"
   | Box -> "Box" 
-  | Pointer t -> "Pointer(" ^ (string_of (t ::reached) t) ^ ")" 
+  | Pointer t -> "Pointer(" ^ (string_of_t (t ::reached) t) ^ ")" 
   | Pseudo -> "Pseudo"
 
-let string_of = string_of []
+let string_of_t = string_of_t []
       
 let rec equal t1 t2 = 
   if t1 == t2 then true else

@@ -58,7 +58,7 @@ let rec ocaml_of_pattern =
   | PtField(xps) -> String.concat ", " (List.map (fun (x, p) -> x ^ " = " ^ (ocaml_of_pattern p)) xps)
   | PtConstr(x, ps) -> x ^ ", " ^ String.concat ", " (List.map ocaml_of_pattern ps)
 
-let rec string_of_typed_expr (e, t) = (string_of_expr e) ^ " : " ^ (Type.string_of t)
+let rec string_of_typed_expr (e, t) = (string_of_expr e) ^ " : " ^ (Type.string_of_t t)
 
 and string_of_expr = 
   function
@@ -83,7 +83,7 @@ and string_of_expr =
   | App(e, args) -> "(" ^ (string_of_typed_expr e) ^ " " ^ (String.concat " " (List.map string_of_typed_expr args)) ^ ")"
   | ExtFunApp(x, args) -> "(" ^ x ^ " " ^ (String.concat " " (List.map string_of_typed_expr args)) ^ ")"
 
-let rec string_of_typed_term (e, t) = (string_of_term e) ^ " : " ^ (Type.string_of t)
+let rec string_of_typed_term (e, t) = (string_of_term e) ^ " : " ^ (Type.string_of_t t)
 
 and string_of_term = 
   function
@@ -97,8 +97,8 @@ and string_of_term =
   | LetRec({ name = (x, t); args = yts; body = e1 }, e2) -> 
       "\nlet rec " ^ x ^ " " ^ (String.concat " " (List.map (fun (y, t) -> y) yts)) ^ " : " ^ (Type.ocaml_of  t) ^ " =\n"
       ^ (string_of_typed_term e1) ^ " in\n" ^ (string_of_typed_term e2)
-  | WrapBody(x, t) -> "(* wrapper " ^ x ^ " " ^ (Type.string_of t) ^ " *)"
-  | UnwrapBody(x, t) -> "(* unwrapper " ^ x ^ " " ^ (Type.string_of t) ^ " *)"
+  | WrapBody(x, t) -> "(* wrapper " ^ x ^ " " ^ (Type.string_of_t t) ^ " *)"
+  | UnwrapBody(x, t) -> "(* unwrapper " ^ x ^ " " ^ (Type.string_of_t t) ^ " *)"
 
 let rec insert_let (e, t) k = (* letを挿入する補助関数 (caml2html: knormal_insert) *)
   match e with

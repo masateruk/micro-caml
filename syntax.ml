@@ -45,17 +45,17 @@ let rec string_of_pattern =
   function
   | PtBool(b) -> "PtBool(" ^ (string_of_bool b) ^ ")"
   | PtInt(n) -> "PtInt(" ^ (string_of_int n) ^ ")"
-  | PtVar(x, t) -> "PtVar(" ^ x ^ "," ^ (Type.string_of t) ^ ")"
+  | PtVar(x, t) -> "PtVar(" ^ x ^ "," ^ (Type.string_of_t t) ^ ")"
   | PtTuple(ps) -> "PtTuple([" ^ (String.concat "; " (List.map string_of_pattern ps)) ^ "])"
   | PtRecord(xps) -> "PtRecord([" ^ (String.concat "; " (List.map (fun (x, p) -> x ^ ", " ^ (string_of_pattern p)) xps)) ^ "])"
   | PtConstr(x, ps) -> "PtConstr(" ^ x ^ ", [" ^ (String.concat "; " (List.map string_of_pattern ps)) ^ "])"
 
-let rec string_of_typed_expr (e, t) = (string_of_expr e) ^ " : " ^ (Type.string_of t)
+let rec string_of_typed_expr (e, t) = (string_of_expr e) ^ " : " ^ (Type.string_of_t t)
 
 and string_of_expr = 
   function
   | Unit -> "Unit"
-  | Nil(t) -> "Nil(" ^ (Type.string_of t) ^ ")"
+  | Nil(t) -> "Nil(" ^ (Type.string_of_t t) ^ ")"
   | Bool(b) -> "Bool(" ^ (string_of_bool b) ^ ")"
   | Int(n) -> "Int(" ^ (string_of_int n) ^ ")"
   | Record(xs) -> "Record(" ^ (String.concat "; " (List.map (fun (x, e) -> x ^ " = " ^ (string_of_typed_expr e)) xs)) ^ ")"
@@ -74,20 +74,20 @@ and string_of_expr =
   | LE(e1, e2) -> "LE(" ^ (string_of_typed_expr e1) ^ ", " ^ (string_of_typed_expr e2) ^ ")"
   | If(e1, e2, e3) -> "If(" ^ (string_of_typed_expr e1) ^ " then " ^ (string_of_typed_expr e2) ^ " else " ^ (string_of_typed_expr e3) ^ ")"
   | Match(e, pes) -> "Match(" ^ (string_of_typed_expr e) ^ ", [" ^ (String.concat "; " (List.map (fun (p, e) -> (string_of_pattern p) ^ " -> " ^ (string_of_typed_expr e)) pes)) ^ "])"
-  | LetVar((x, t), e1, e2) -> "LetVar(" ^ x ^ " : " ^ (Type.string_of t) ^ " = " ^ (string_of_typed_expr e1) ^ " in " ^ (string_of_typed_expr e2) ^ ")"
+  | LetVar((x, t), e1, e2) -> "LetVar(" ^ x ^ " : " ^ (Type.string_of_t t) ^ " = " ^ (string_of_typed_expr e1) ^ " in " ^ (string_of_typed_expr e2) ^ ")"
   | Var(x) -> "Var(" ^ x ^ ")"
   | Constr(x, es) -> "Constr(" ^ x ^ ", " ^ (String.concat ", " (List.map string_of_typed_expr es)) ^ ")"
-  | LetRec({ name = (x, t); args = yts; body = e1 }, e2) -> "LetRec(" ^ x ^ "(" ^ (String.concat ", " (List.map (fun (y, t) -> y ^ " : " ^ (Type.string_of t)) yts)) ^ ") : " ^ (Type.string_of t) ^ " = " ^ (string_of_typed_expr e1) ^ " in " ^ (string_of_typed_expr e2) ^ ")"
+  | LetRec({ name = (x, t); args = yts; body = e1 }, e2) -> "LetRec(" ^ x ^ "(" ^ (String.concat ", " (List.map (fun (y, t) -> y ^ " : " ^ (Type.string_of_t t)) yts)) ^ ") : " ^ (Type.string_of_t t) ^ " = " ^ (string_of_typed_expr e1) ^ " in " ^ (string_of_typed_expr e2) ^ ")"
   | App(e, es) -> "App(" ^ (string_of_typed_expr e) ^ ", [" ^ (String.concat ", " (List.map string_of_typed_expr es)) ^ "])"
-  | WrapBody(x, t) -> "WrapBody(" ^ x ^ ", " ^ (Type.string_of t) ^ ")"
-  | UnwrapBody(x, t) -> "UnwrapBody(" ^ x ^ ", " ^ (Type.string_of t) ^ ")"
+  | WrapBody(x, t) -> "WrapBody(" ^ x ^ ", " ^ (Type.string_of_t t) ^ ")"
+  | UnwrapBody(x, t) -> "UnwrapBody(" ^ x ^ ", " ^ (Type.string_of_t t) ^ ")"
 
 let string_of_fundef { name = (x, t); args = yts; body = e } =
-  x ^ " " ^ (String.concat " " (List.map (fun (y, t) -> y) yts)) ^ " : " ^ (Type.string_of t) ^ " = " ^ (string_of_typed_expr e) 
+  x ^ " " ^ (String.concat " " (List.map (fun (y, t) -> y) yts)) ^ " : " ^ (Type.string_of_t t) ^ " = " ^ (string_of_typed_expr e) 
 
 let rec string_of_def = function
   | TypeDef(x, t) -> "TypeDef(" ^ x ^ ", " ^ (Type.string_of_tycon t) ^ ")"
-  | VarDef((x, t), e) -> "VarDef((" ^ x ^ ", " ^ (Type.string_of t) ^ "), " ^ (string_of_typed_expr e)
+  | VarDef((x, t), e) -> "VarDef((" ^ x ^ ", " ^ (Type.string_of_t t) ^ "), " ^ (string_of_typed_expr e)
   | RecDef(fundef) -> "RecDef(" ^ (string_of_fundef fundef) ^ ")"
       
 let fold f defs =

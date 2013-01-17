@@ -23,21 +23,21 @@ let newtyvar () =
   Printf.sprintf "tyvar_%d" !counter
 let newmetavar () = ref None
 
-let rec string_of = 
+let rec string_of_t = 
   function
   | Var(v) -> "Var(" ^ v ^ ")"
-  | Field(tid, t) -> "Field(" ^ (string_of tid) ^ ", " ^ (string_of t) ^ ")"
+  | Field(tid, t) -> "Field(" ^ (string_of_t tid) ^ ", " ^ (string_of_t t) ^ ")"
   | Variant(x, ytss) -> "Variant(" ^ x ^ ", " ^
       (String.concat " | " 
          (List.map 
             (fun (y, ts) -> y ^ 
               (match ts with 
               | [] -> "" 
-              | ts -> " of " ^ (String.concat " * " (List.map string_of ts)))) ytss)) ^ ")"
-  | App(tycon, ts) -> "App(" ^ (string_of_tycon tycon) ^ ", [" ^ (String.concat "; " (List.map string_of ts)) ^ "])"
-  | Poly([], t)-> "Poly([], " ^ (string_of t) ^ ")"
-  | Poly(xs, t)-> "Poly(" ^ (String.concat ", " xs) ^ ", " ^ (string_of t) ^ ")"
-  | Meta{ contents = Some(t) } -> "Meta(Some(" ^ (string_of t) ^ "))"
+              | ts -> " of " ^ (String.concat " * " (List.map string_of_t ts)))) ytss)) ^ ")"
+  | App(tycon, ts) -> "App(" ^ (string_of_tycon tycon) ^ ", [" ^ (String.concat "; " (List.map string_of_t ts)) ^ "])"
+  | Poly([], t)-> "Poly([], " ^ (string_of_t t) ^ ")"
+  | Poly(xs, t)-> "Poly(" ^ (String.concat ", " xs) ^ ", " ^ (string_of_t t) ^ ")"
+  | Meta{ contents = Some(t) } -> "Meta(Some(" ^ (string_of_t t) ^ "))"
   | Meta{ contents = None } -> "Meta(None)"
       
 and string_of_tycon = 
@@ -48,7 +48,7 @@ and string_of_tycon =
   | Arrow -> "Arrow"
   | Tuple -> "Tuple"
   | Record(x, fs) -> "Record(" ^ x ^ ", {" ^ (String.concat ", " fs) ^ "})"
-  | TyFun(xs, t) -> "TyFun(" ^ (String.concat ", " xs) ^ ", " ^ (string_of t) ^ ")"
+  | TyFun(xs, t) -> "TyFun(" ^ (String.concat ", " xs) ^ ", " ^ (string_of_t t) ^ ")"
   | NameTycon(x, { contents = None }) -> "NameTycon(" ^ x ^ ", None)"
   | NameTycon(x, { contents = Some(t) }) -> "NameTycon(" ^ x ^ ", Some(" ^ (string_of_tycon t) ^ "))"
       
@@ -59,7 +59,7 @@ let rec prefix =
   | Variant _ -> "v"
   | App(tycon, _) -> prefix_of_tycon tycon
   | Poly(_, t) -> prefix t
-  | t -> D.printf "t = %s\n" (string_of t); assert false
+  | t -> D.printf "t = %s\n" (string_of_t t); assert false
       
 and prefix_of_tycon = 
   function
@@ -94,7 +94,7 @@ let rec ocaml_of =
   | Poly(xs, t) -> ocaml_of t      
   | App(TyFun([], t), []) -> ocaml_of t
   | App(NameTycon(x, _), ts) -> (String.concat " * " (List.map ocaml_of ts)) ^ " " ^ x
-  | t -> Printf.eprintf "%s : not implemented yet." (string_of t); assert false
+  | t -> Printf.eprintf "%s : not implemented yet." (string_of_t t); assert false
 
 (* 等値判定。型推論後のみ使用可能。*)
 let rec equal t1 t2 = 
