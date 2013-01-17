@@ -220,7 +220,6 @@ let rec concat s1 (x, t) s2 =
       end
       
 let toplevel : def list ref = ref []
-let meaningless = ref S.empty
 let failure = CallDir(Var("assert"), [Bool(false)])
 
 let find_named_type t = 
@@ -556,7 +555,6 @@ let rec g' (venv, tenv as env) ids (e, t) = (* C言語の式生成 (caml2html: c
       Var(Id.to_upper x), M.find (Id.to_upper x) venv
   | Closure.Constr(x, es) -> 
       insert_lets es (fun ets' -> CallDir(Var(x), (List.map fst ets')), return_type (M.find x venv))
-  | Closure.App((Closure.Var(x), ft), [y]) when S.mem x !meaningless -> g' env ids y
   | Closure.App(e, ys) -> 
       let ce = e in
       let rec bind (e, t) ets = 
@@ -660,19 +658,10 @@ let constructors =
       List.map (fun y -> (y, CType.NameTy(x, { contents = Some(t) })), None) ys
   | _ -> []
 
-
-let is_meaningless_unwrapper (x, t) (e, _) =
-  match t, e with
-  | Type.App(Type.Arrow, [Type.App(Type.Record(x, _), _); Type.App(Type.Record(y, _), _)]), Closure.UnwrapBody _
-  | Type.App(Type.Arrow, [Type.Variant(x, _); Type.Variant(y, _)]), Closure.UnwrapBody _ -> true
-  | _ -> false
-
-let h (venv, tenv as env) def = (* トップレベル定義の C 言語変換 (caml2html: c_h) *)
+let h (venv, tenv) def = (* トップレベル定義の C 言語変換 (caml2html: c_h) *)
   let () = D.printf "C.h %s\n" (Closure.string_of_def def) in
   match def with
   | Closure.FunDef({ Closure.name = (Id.L(x), t); Closure.args = yts; Closure.formal_fv = zts; Closure.body = e }) ->
-      if is_meaningless_unwrapper (x, t) e then (meaningless := S.add x !meaningless; env)
-      else
       let yts = List.map (fun (y, t) -> (y, translate_type tenv t)) yts in
       let zts = List.map (fun (z, t) -> (z, translate_type tenv t)) zts in
       let body, t' = g ((M.add x (translate_type tenv t) (M.add_list yts (M.add_list zts venv))), tenv) M.empty e in 
