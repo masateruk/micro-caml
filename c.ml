@@ -223,38 +223,7 @@ let toplevel : def list ref = ref []
 let meaningless = ref S.empty
 let failure = CallDir(Var("assert"), [Bool(false)])
 
-let maker_name t = "_make" ^ (string_of_type t)
-let make_closure t = 
-  let name = maker_name t in
-  let args, body = 
-    match t with
-    | CType.NameTy(_, { contents = Some(CType.Struct(_, xts)) }) -> 
-        let c = gentmp t in
-        let s' = List.fold_right (fun (x, t) s -> (Seq(Assign(Field((Var(c), x)), Var(x)), s))) xts (Exp(Var(c))) in
-        xts, Seq(Dec((c, t), None), s')
-    | _ -> Printf.eprintf "invalid type : %s\n" (string_of_type t); assert false 
-  in
-  name, FunDef({ name = Id.L(name); args = args; body = block (insert_return t body); ret = t }, ref false)
-    
-let applyer_name t = "_apply" ^ (string_of_type t)
-let rec apply_closure t args =  
-  let name = applyer_name t in
-  let var = gentmp t in
-  let args = (var, t) :: (List.map (fun t -> gentmp t, t) args) in
-  let (f, t'), zts = 
-    match t with 
-    | CType.NameTy(_, { contents = Some(CType.Struct(_, xt::xts)) }) -> (xt, xts) 
-    | _ -> Printf.eprintf "invalid type : %s\n" (string_of_type t); assert false in
-  let ret = 
-    match t' with 
-    | CType.Fun(_, ret) -> ret 
-    | _ -> assert false in
-  let body = 
-    Exp(CallDir(Field((Var(var), f)), 
-                (List.map (fun (y, _) -> Var(y)) (List.tl args)) @ (List.map (fun (z, _) -> Field(Var(var), z)) zts))) in
-  ret, FunDef({ name = Id.L(name); args = args; body = block (insert_return ret body); ret = ret }, ref false)
-    
-let find_name_type t = 
+let find_named_type t = 
   let find_typedef t = 
     List.find 
       (fun def -> 
@@ -283,9 +252,9 @@ let field_type st x =
   | CType.Struct(_, xts) -> List.assoc x xts
   | t -> Printf.eprintf "invalid type : %s\n" (string_of_type t); assert false 
       
-let name_type t =
+let named_type t =
   try
-    find_name_type t
+    find_named_type t
   with
     Not_found ->
       let name = (gentmp t) ^ "_t" in
@@ -307,8 +276,8 @@ let rec k tenv t =
     | Type.App(Type.Unit, []) -> CType.Void
     | Type.App(Type.Bool, []) -> CType.Bool
     | Type.App(Type.Int, []) -> CType.Int
-    | Type.App(Type.Tuple, ts) -> name_type (CType.Struct(Type.name t, List.map (fun t -> let t' = k' local_tenv t in (gentmp t'), t') ts)) (* Tuple型には名前をつける *)
-    | Type.App(Type.Arrow, ts) -> name_type (CType.Fun(List.map (k' local_tenv) (L.init ts), k' local_tenv (L.last ts))) (* Fun型には名前をつける *)
+    | Type.App(Type.Tuple, ts) -> named_type (CType.Struct(Type.name t, List.map (fun t -> let t' = k' local_tenv t in (gentmp t'), t') ts)) (* Tuple型には名前をつける *)
+    | Type.App(Type.Arrow, ts) -> named_type (CType.Fun(List.map (k' local_tenv) (L.init ts), k' local_tenv (L.last ts))) (* Fun型には名前をつける *)
     | Type.App(Type.Record(x, _), _) when M.mem x tenv -> 
         CType.NameTy(x, { contents = Some(M.find x tenv) }) (* すでに型環境に定義がある場合は名前型を返す *)
     | Type.App(Type.Record(x, _), _) when M.mem x local_tenv -> assert false (* TBD ローカル型環境にある場合は struct タグ名* で参照する *)
@@ -347,17 +316,74 @@ let rec translate_tycon tenv =
   | Type.TyFun(_, t) -> k tenv t (* 型変数が残っていてもBoxに変換するため、型引数は無視できる *)
   | t -> Printf.eprintf "invalid type constructor : t = %s\n" (Type.string_of_tycon t); assert false
       
-let find_closure_type yts t = find_name_type (CType.Struct("", ("_f", t) :: yts))
-  
-let rec closure_type yts t = 
-  match t with
-  | CType.Fun(args, ret) -> 
-      let name = (Id.genid "closure") ^ "_t" in name, CType.Struct("", ("_f", t) :: yts)
-  | _ -> Printf.eprintf "invalid type : %s\n" (string_of_type t); assert false
-    
 (* 改名。改名マップに ID.t があれば改名後の名前を返す。なければ、元の名前を返す。*)      
 let rename m x = if M.mem x m then M.find x m else x
   
+(* クロージャ変換補助関数群 *)
+let rec closure_type t args = 
+  try
+    find_named_type (CType.Struct("", ("_f", t) :: args))
+  with
+    Not_found ->
+      match t with
+      | CType.Fun _ ->
+          let name = (Id.genid "closure") ^ "_t" in 
+          let t = CType.Struct("", ("_f", t) :: args) in
+          toplevel := TypeDef((name, t), ref false) :: !toplevel;
+          CType.NameTy(name, { contents = Some(t) })
+      | _ -> Printf.eprintf "invalid type : %s\n" (string_of_type t); assert false
+    
+
+let make_closure t = 
+  let name = "_make" ^ (string_of_type t) in
+  
+  let find_make_closure t =
+    let _ = List.find (function FunDef({ name = Id.L(x); }, _) when x = name -> true | _ -> false) !toplevel in
+    name in
+  
+  try
+    find_make_closure t
+  with
+    Not_found ->
+      let args, body = 
+        match t with
+        | CType.NameTy(_, { contents = Some(CType.Struct(_, xts)) }) -> 
+            let c = gentmp t in
+            let s' = List.fold_right (fun (x, t) s -> (Seq(Assign(Field((Var(c), x)), Var(x)), s))) xts (Exp(Var(c))) in
+            xts, Seq(Dec((c, t), None), s')
+        | _ -> Printf.eprintf "invalid type : %s\n" (string_of_type t); assert false in
+      let fundef = FunDef({ name = Id.L(name); args = args; body = block (insert_return t body); ret = t }, ref false) in
+      toplevel := fundef :: !toplevel;
+      name
+
+let apply_closure t arg_types =  
+  let name = "_apply" ^ (string_of_type t) in
+  
+  let find_apply_closure t =
+    let def = List.find (function FunDef({ name = Id.L(x); }, _) when x = name -> true | _ -> false) !toplevel in
+    let t = match def with
+    | FunDef({ args = args; ret = ret }, _) -> CType.Fun(List.map snd args, ret)
+    | _ -> Printf.eprintf "invalid type : %s\n" (string_of_type t); assert false in
+    name, t in
+  
+  try
+    find_apply_closure t
+  with
+    Not_found ->
+      let var = gentmp t in
+      let args = (var, t) :: (List.map (fun t -> gentmp t, t) arg_types) in
+      let (f, t'), zts = 
+        match t with 
+        | CType.NameTy(_, { contents = Some(CType.Struct(_, xt::xts)) }) -> (xt, xts) 
+        | _ -> Printf.eprintf "invalid type : %s\n" (string_of_type t); assert false in
+      let ret = return_type t' in
+      let body = 
+        Exp(CallDir(Field((Var(var), f)), 
+                    (List.map (fun (y, _) -> Var(y)) (List.tl args)) @ (List.map (fun (z, _) -> Field(Var(var), z)) zts))) in
+      let fundef = FunDef({ name = Id.L(name); args = args; body = block (insert_return ret body); ret = ret }, ref false) in
+      toplevel := fundef :: !toplevel;
+      name, CType.Fun(arg_types, ret)
+        
 (* 参照カウンタ使用時、Box型の変数はカウンタ操作が必要なため一時変数に代入する *)
 let rec insert_let (e, t) k =  
   match e, t with
@@ -505,7 +531,7 @@ let rec g' (venv, tenv as env) ids (e, t) = (* C言語の式生成 (caml2html: c
   | Closure.LE (e1, e2) -> binop e1 e2 (fun e1' e2' -> LE (e1', e2')) CType.Bool
   | Closure.Record(xes) -> 
       insert_lets (List.map snd xes) (fun ets ->
-        let t = name_type (CType.Struct("", List.combine (List.map fst xes) (List.map snd ets))) in
+        let t = named_type (CType.Struct("", List.combine (List.map fst xes) (List.map snd ets))) in
         let name = 
           match t with 
           | CType.NameTy(n, _) -> n 
@@ -517,7 +543,7 @@ let rec g' (venv, tenv as env) ids (e, t) = (* C言語の式生成 (caml2html: c
         Field(e, x), field_type st x)
   | Closure.Tuple(es) -> 
       insert_lets es (fun ets -> 
-        let t = name_type (CType.Struct("", List.map (fun (_, t) -> (gentmp t), t) ets)) in (* namety 関数で名前付き構造体型をひく *)
+        let t = named_type (CType.Struct("", List.map (fun (_, t) -> (gentmp t), t) ets)) in (* namety 関数で名前付き構造体型をひく *)
         let name, fields = (* フィールド名は namety でひいたものを採用 *)
           match t with 
           | CType.NameTy(n, { contents = Some(CType.Struct(_, xts)) }) -> n, List.map fst xts 
@@ -539,9 +565,8 @@ let rec g' (venv, tenv as env) ids (e, t) = (* C言語の式生成 (caml2html: c
             begin
               match t with
               | CType.NameTy(_, { contents = Some(CType.Struct(_)) }) -> 
-                  let rt, fundef = apply_closure t (List.map snd ets) in
-                  toplevel := fundef :: !toplevel;
-                  CallDir(Var(applyer_name t), e :: (List.map fst ets)), rt
+                  let name, t = apply_closure t (List.map snd ets) in
+                  CallDir(Var(name), e :: (List.map fst ets)), (return_type t)
               | CType.NameTy(_, { contents = Some(CType.Fun(args, rt)) })
               | CType.Fun(args, rt) ->
                   CallDir(e, List.map2 (fun (e, t) t' -> e) ets args), rt
@@ -598,22 +623,11 @@ let rec g (venv, tenv as env) ids (e, t) = (* C言語の文生成 (caml2html: c_
   | Closure.MakeCls((x, _), { Closure.entry = Id.L(l); Closure.actual_fv = ys }, e2) -> (* クロージャの生成 (caml2html: c_makecls) *)
       let ys = List.map (rename ids) ys in
       let yts = List.map (fun y -> (y, M.find y venv)) ys in
-      let t, maker =
-        (try
-           let t = find_closure_type yts (M.find l venv) in
-           let maker = maker_name t in
-           t, maker
-         with
-           Not_found ->
-             let name, t = closure_type yts (M.find l venv) in (* (x, t) の型 t は Type.Arrow（関数）型なので型環境からトップレベルの型を引いてクロージャ型に変換する *)
-             toplevel := TypeDef((name, t), ref false) :: !toplevel;
-             let t = CType.NameTy(name, { contents = Some(t) }) in
-             let maker, fundef = make_closure t in
-             toplevel := fundef :: !toplevel;
-             t, maker) in
+      let t = closure_type (M.find l venv) yts in
+      let name = make_closure t in
       let x' = gentmp t in (* クロージャはトップレベル関数と名前が被っているので改名する *)
       let e2', t2 = g ((M.add x' t venv), tenv) (M.add x x' ids) e2 in
-      Seq(Dec((x', t), Some(MakeClosure(Id.L(maker), l, yts))), e2'), t2
+      Seq(Dec((x', t), Some(MakeClosure(Id.L(name), l, yts))), e2'), t2
 
 let constructors =
   function
