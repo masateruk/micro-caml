@@ -3,7 +3,7 @@ open C
 let prec = 
   function
   | Nop | Nil _ | Bool _ | Int _ | Struct _ | Var _ 
-  | CallDir _ | MakeClosure _ | Field _  | Sizeof _ | Ref _ | Deref _ | Cast _ -> 9
+  | CallDir _ | MakeClosure _ | FieldDot _  | FieldArrow _  | Sizeof _ | Ref _ | Deref _ | Cast _ -> 9
   | Not _ | Neg _ -> 8
   | Mul _ | Div _ -> 7
   | Add _ | Sub _  -> 6
@@ -27,8 +27,9 @@ let rec string_of_type ?(depth = 0) ?(tags = []) =
       (String.concat ",\n" (List.map (fun x -> (indent (depth + 1)) ^ x) xs)) ^ "\n" ^ 
     (indent depth) ^ "}"
   | CType.Fun _ -> assert false
-  | CType.Struct(tag, xts) ->
+  | CType.Struct(tag, kind, xts) ->
       (indent depth) ^ "struct" ^ (if tag = "" then "" else " " ^ tag) ^ " {\n" ^ 
+        (match kind with CType.Ref -> (indent (depth + 1)) ^ "ref_base_t base;\n" | _ -> "") ^
         (String.concat ";\n" 
            (List.fold_left
               (fun s (x, t) -> 
@@ -43,7 +44,7 @@ let rec string_of_type ?(depth = 0) ?(tags = []) =
               (fun s (x, t) -> 
                 match t with
                 | CType.Pseudo -> s
-                | t -> (string_of_id ~depth:(depth + 1) x t) :: s) [] (List.rev xts))) ^ ";\n" ^ 
+                | t -> (string_of_id ~depth:(depth + 1) ~tags:tags x t) :: s) [] (List.rev xts))) ^ ";\n" ^ 
         (indent depth) ^ "}"
   | CType.NameTy(x', _) when List.mem x' tags -> (indent depth) ^ "struct " ^ x'
   | CType.NameTy(x', _) -> (indent depth) ^ x'
@@ -68,7 +69,8 @@ let rec string_of_exp outer e =
     | Bool(b) -> string_of_bool b
     | Int(i) -> string_of_int i
     | Struct(x, xes) -> "(" ^ x ^ "){" ^ (String.concat ", " (List.map (fun (x, e) -> "." ^ x ^ " = " ^ (string_of_exp inner e)) xes)) ^ "}"
-    | Field(e, y) -> (string_of_exp inner e) ^ "." ^ y
+    | FieldDot(e, y) -> (string_of_exp inner e) ^ "." ^ y
+    | FieldArrow(e, y) -> (string_of_exp inner e) ^ "->" ^ y
     | Not(e) -> "!" ^ (string_of_exp inner e)
     | And(e1, e2) -> (string_of_exp inner e1) ^ " && " ^ (string_of_exp inner e2)
     | Or(e1, e2) -> (string_of_exp inner e1) ^ " || " ^ (string_of_exp inner e2)
@@ -115,8 +117,8 @@ let rec string_of_prog (Prog(defs)) =
     | If(e, s1, s2) -> padding ^ "if (" ^ (string_of_exp e) ^ ") " ^ (and_statement s1) ^ " else " ^ (and_statement s2)
     | Return(e) -> padding ^ "return " ^ (string_of_exp e)
     | Seq(s1, s2) -> (string_of_statement header_depth inner_depth s1) ^ (separator s1) ^ "\n" ^ (string_of_statement inner_depth inner_depth s2) 
-    | Block([], s) -> padding ^ "{\n" ^ (newline_statement s) ^ ";\n" ^ and_padding ^ "}" 
-    | Block(decs, s) -> padding ^ "{\n" ^ (String.concat ";\n" (List.map (string_of_dec (inner_depth + 1)) decs)) ^ ";\n\n" ^ (newline_statement s) ^ ";\n" ^ and_padding ^ "}" 
+    | Block([], s) -> padding ^ "{\n" ^ (newline_statement s) ^ (separator s) ^ "\n" ^ and_padding ^ "}" 
+    | Block(decs, s) -> padding ^ "{\n" ^ (String.concat ";\n" (List.map (string_of_dec (inner_depth + 1)) decs)) ^ ";\n\n" ^ (newline_statement s) ^ (separator s) ^ "\n" ^ and_padding ^ "}" 
   and string_of_dec depth = 
     function
     | VarDec((x, t), None) -> (indent depth) ^ (string_of_id x t)

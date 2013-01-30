@@ -10,6 +10,7 @@ OPTIONS :=
 endif
 TESTS = $(shell ls *.ml)
 DEFFILES = $(patsubst %.ml, %.d, $(TESTS))
+CFILES = $(patsubst %.ml, %.c, $(TESTS))
 TRASH = *.log *.c *.d *.o *.out *.cmo *.cmi
 
 USE_GC ?= 0
@@ -32,17 +33,20 @@ LDFLAGS += -L/usr/local/lib -lgc
 endif
 
 .PHONY:all do-test clean depend full-test
-.PRECIOUS: $(patsubst %.ml, %.c, $(TESTS))
+.PRECIOUS: $(CFILES)
 
 all: do-test
 
-do-test: $(TESTS:%.ml=%.diff) 
+do-test: clean_c $(TESTS:%.ml=%.diff) 
 
 full-test: do-full-test clean
 
 do-full-test:
 	make USE_GC=0 clean_test
 	make USE_GC=1 clean_test
+
+clean_c:
+	rm -f $(CFILES)
 
 clean_test: clean
 	make do-test

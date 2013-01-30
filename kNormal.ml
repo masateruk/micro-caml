@@ -127,7 +127,7 @@ let rec pattern env p =
       let env, ps' = List.fold_left (fun (env, ps) p -> let env', p' = pattern env p in env', p' :: ps) (env, []) (List.rev ps) in
       env, PtConstr(x, ps')
         
-let rec g ({ Env.venv = venv; types = types; tycons = tycons } as env) (e, t) = (* K正規化ルーチン本体 (caml2html: knormal_g) *)
+let rec g ({ Env.venv = venv; tenv = tenv } as env) (e, t) = (* K正規化ルーチン本体 (caml2html: knormal_g) *)
   let _ = D.printf "kNormal.g %s\n" (Syntax.string_of_expr e) in  
 
   let insert_lets es k =
@@ -216,14 +216,13 @@ let fold f env defs =
   List.rev defs'
 
 let map f defs =
-  let f' (({ Env.venv = venv; types = types; tycons = tycons } as env), defs) def =
+  let f' (({ Env.venv = venv; tenv = tenv } as env), defs) def =
     let env', def' = 
       match def with 
       | TypeDef(x, t) -> 
-          let env' = 
-            { env with 
-              Env.types  = M.add_list (Type.types t) types; 
-              Env.tycons = M.add_list ((x, t) :: (Type.tycons t)) tycons } in
+          let env' = { env with 
+            Env.venv = M.add_list (Type.vars t) venv;
+            Env.tenv = M.add_list (Type.types t) tenv } in
           env', f env' def
       | VarDef((x, t), e) ->  
           Env.add_var_type env x t, f env def

@@ -64,7 +64,7 @@ let mark_id defs x =
     (function 
     | FunDef({ name = Id.L(x'); _ }, b) when x' = x -> b := true 
     | TypeDef((_, CType.Enum(_, xs)), b) when List.mem x xs -> b := true 
-    | EnumDef(xs, b) when List.mem x xs -> b := true 
+    | EnumDef(xs, b) when List.mem x xs -> b := true
     | _ -> ()) 
     defs
 
@@ -75,12 +75,12 @@ let rec mark_ty defs t =
       | CType.NameTy(x, { contents = Some(t) }), TypeDef((x', t'), b) when x' = x && CType.equal t t' -> 
           begin
             match t with
+            | CType.Void | CType.Int | CType.Bool | CType.Enum _ | CType.Box | CType.Pseudo | CType.NameTy(_, { contents = None }) -> ()
             | CType.Fun(xs, y) -> List.iter (mark_ty defs) (y :: xs)
-            | CType.Struct(_, xts) 
+            | CType.Struct(_, _, xts) 
             | CType.Union(xts) -> List.iter (mark_ty defs) (List.map snd xts)
             | CType.NameTy(_, { contents = Some(t) }) 
             | CType.Pointer(t) -> mark_ty defs t
-            | _ -> ()
           end;
           b := true
       | _ -> ()) 
@@ -91,7 +91,8 @@ let rec mark_exp defs =
   | Nop | Bool _ | Int _ -> ()
   | Nil(t) -> mark_ty defs t
   | Struct(_, xes) -> List.iter (fun (x, e) -> mark_exp defs e) xes
-  | Field(e, y) -> mark_exp defs e; mark_id defs y
+  | FieldDot(e, y) 
+  | FieldArrow(e, y) -> mark_exp defs e; mark_id defs y
   | Not(e) | Neg(e) -> mark_exp defs e
   | And(e1, e2) | Or(e1, e2)
   | Add(e1, e2) | Sub(e1, e2) | Mul(e1, e2) | Div(e1, e2) | Eq(e1, e2) | LE(e1, e2) -> mark_exp defs e1; mark_exp defs e2
@@ -133,7 +134,8 @@ let rec simplify_expr =
   function
   | Int _ | Bool _ | Nil _ | Nop | Cons _ | Var _ | MakeClosure _ | Sizeof _ | Comma as e -> e
   | Struct(x, yes) -> Struct(x, List.map (fun (y, e) -> (y, simplify_expr e)) yes)
-  | Field(e, x) -> Field(simplify_expr e, x)
+  | FieldDot(e, x) -> FieldDot(simplify_expr e, x)
+  | FieldArrow(e, x) -> FieldArrow(simplify_expr e, x)
   | Not(e) -> Not(simplify_expr e)
   | And(e1, e2) -> 
       begin 

@@ -14,7 +14,8 @@ and expr =
   | Bool of bool
   | Int of int
   | Struct of Id.t * (Id.t * expr) list
-  | Field of expr * Id.t
+  | FieldDot of expr * Id.t
+  | FieldArrow of expr * Id.t
   | Not of expr
   | And of expr * expr
   | Or of expr * expr

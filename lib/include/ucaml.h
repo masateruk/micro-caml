@@ -28,40 +28,65 @@ void debug_free(void* p);
 
 #endif
 
+typedef struct ref_base_t {
+    int count;
+    void (*destructor)(struct ref_base_t* );
+} ref_base_t;
+
+static inline ref_base_t* new_ref_base(int size, void (*destructor)(ref_base_t*))
+{
+    ref_base_t* p = (ref_base_t*)D_MALLOC(size);
+    p->count = 1;
+    p->destructor = destructor;
+    return p;
+}
+
+static inline void delete_ref_base(ref_base_t* base)
+{
+    base->destructor(base);
+    D_FREE(base);
+}
+
+static inline void ref_base_add_ref(ref_base_t* base)
+{
+    base->count++;
+}
+
+static inline void ref_base_release(ref_base_t* base)
+{
+    if (--base->count == 0) {
+        delete_ref_base(base);
+    }
+}
+
+#define add_ref(p) ref_base_add_ref((ref_base_t*)p)
+#define release(p) ref_base_release((ref_base_t*)p)
+
 typedef struct {
-  void* p;
-  int count;
+    ref_base_t base;
+    void* p;
 } box_t;
 
 typedef box_t* sp_t;
 
+static inline void delete_sp(ref_base_t* base)
+{
+    box_t* b = (box_t*)base;
+    D_FREE(b->p);
+}
+
 static inline sp_t new_sp(int size)
 {
-    box_t* b = D_MALLOC(sizeof(box_t));
-    assert(b != NULL);
+    box_t* b = (box_t*)new_ref_base(sizeof(box_t), delete_sp);
 
     b->p = D_MALLOC(size);
     assert(b->p != NULL);
 
-    b->count = 1;
     return b;
 }
 
 #define sp_get(b) ((b)->p)
 #define sp_count(b) ((b)->count)
-
-static inline void add_ref(sp_t p)
-{
-    ++sp_count(p);
-}
-
-static inline void release(sp_t p)
-{
-    if (--sp_count(p) == 0) {
-        D_FREE(sp_get(p));
-        D_FREE(p);
-    }
-}
 
 static inline void print_int(int x) { 
   printf("%d", x); 

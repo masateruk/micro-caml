@@ -299,7 +299,7 @@ typedef:
 | type_params IDENT EQUAL LBRACE field_decls RBRACE
     { TypeDef($2, Type.TyFun($1, (Type.App(Type.Record($2, List.map fst $5), List.map snd $5)))) }
 | type_params IDENT EQUAL variant_decls
-    { TypeDef($2, Type.TyFun($1, (Type.Variant($2, $4)))) }
+    { TypeDef($2, Type.TyFun($1, (Type.App(Type.Variant($2, $4), [])))) }
 ;
 type_params:
 | /* empty */

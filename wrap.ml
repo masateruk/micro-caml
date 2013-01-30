@@ -17,7 +17,7 @@ let gen_wrapper s t =
         "_wrap_" ^ (Type.name t), t
     | Type.App(Type.Arrow, us) -> 
         "_wrap_closure" ^ (Id.genid ""), (Type.App(Type.Arrow, (List.map (fun _ -> (Type.Var(Type.newtyvar ()))) us)))
-    | Type.Variant(x, _) ->
+    | Type.App(Type.Variant(x, _), _) ->
         "_wrap_" ^ x ^ (Id.genid ""), t
     | t -> Printf.eprintf "not implemented. t = %s\n" (Type.string_of_t t); assert false in
   let ft = Type.App(Type.Arrow, [t'; s]) in  
@@ -34,7 +34,7 @@ let gen_unwrapper s t =
         "_unwrap_" ^ (Type.name t), t
     | Type.App(Type.Arrow, vs) ->
         "_unwrap_closure" ^ (Id.genid ""), (Type.App(Type.Arrow, (List.map (fun _ -> Type.Var(Type.newtyvar ())) vs)))
-    | Type.Variant(x, _) ->
+    | Type.App(Type.Variant(x, _), _) ->
         "_unwrap_" ^ x ^ (Id.genid ""), t
     | t -> Printf.eprintf "not implemented. t = %s\n" (Type.string_of_t t); assert false in
   let ft = Type.App(Type.Arrow, [s; t]) in  
@@ -58,8 +58,7 @@ let rec has_tyvar t =
   match t with
   | Type.Var _ -> true
   | Type.Field(_, s) -> has_tyvar s
-  | Type.Variant(_, ytss) -> List.exists (fun (y, ts) -> (List.exists has_tyvar ts)) ytss
-  | Type.App(Type.TyFun(_, s), us) -> (has_tyvar s) || (List.exists has_tyvar us)
+  | Type.App(Type.Variant(_, constrs), us) -> (List.exists (fun (_, us) -> (List.exists has_tyvar us)) constrs) || (List.exists has_tyvar us)
   | Type.App(_, us) -> List.exists has_tyvar us
   | Type.Poly(_, s) -> assert false
   | Type.Meta({ contents = None }) -> false
@@ -78,7 +77,7 @@ let rec wrap (e, s) t =
     | Type.App(Type.Int, []), Type.Var _ 
     | Type.App(Type.Record _, _), Type.Var _ 
     | Type.App(Type.Tuple, _), Type.Var _ 
-    | Type.Variant(_), Type.Var _ ->
+    | Type.App(Type.Variant(_), _), Type.Var _ ->
         App(wrapper s t, [(e, s)]), t
     | Type.App(Type.Arrow, us), Type.Var _ -> 
         let name = Id.genid "fw" in
@@ -118,12 +117,13 @@ and unwrap (e, s) t =
   let e', t' =
     match s, t with
     | s, t when Type.equal s t -> e, t
+    | Type.App(Type.Variant(x, _), _), Type.App(Type.Variant(y, _), _) when x = y -> e, t
     | Type.Var _, Type.Var _ -> e, t
     | Type.Var _, Type.App(Type.Bool, []) 
     | Type.Var _, Type.App(Type.Int, []) 
     | Type.Var _, Type.App(Type.Record _, _) 
     | Type.Var _, Type.App(Type.Tuple, _) 
-    | Type.Var _, Type.Variant(_) ->
+    | Type.Var _, Type.App(Type.Variant(_), _) ->
         App(unwrapper s t, [(e, s)]), t
     | Type.Var _, Type.App(Type.Arrow, vs) ->
         let e' = 
@@ -160,7 +160,7 @@ let subst_map s t =
     | s, t -> xs in (* Printf.eprintf "invalid type : s = %s\n  t = %s\n" (Type.string_of_typ s) (Type.string_of_typ t); assert false in *)
   loop s t []
 
-let rec pattern ({ Env.venv = venv; types = types; tycons = tycons } as env) p =    
+let rec pattern ({ Env.venv = venv; tenv = tenv } as env) p =    
   match p with
   | PtBool(b) -> env, Type.App(Type.Bool, [])
   | PtInt(n) -> env, Type.App(Type.Int, [])
@@ -171,7 +171,7 @@ let rec pattern ({ Env.venv = venv; types = types; tycons = tycons } as env) p =
   | PtRecord(xps) -> 
       let env, _, ts' = List.fold_left (fun (env, xps, ts) (x, p) -> let env', t' = pattern env p in env', (x, p) :: xps, t' :: ts) (env, [], []) (List.rev xps) in
       begin
-        match M.find (fst (List.hd xps)) types with
+        match M.find (fst (List.hd xps)) tenv with
         | Type.Poly(_, Type.Field(t, _)) ->
             begin 
               match t with
@@ -184,13 +184,13 @@ let rec pattern ({ Env.venv = venv; types = types; tycons = tycons } as env) p =
   | PtConstr(x, ps) -> 
       let env, _, ts' = List.fold_left (fun (env, ps, ts) p -> let env', t' = pattern env p in env', p :: ps, t' :: ts) (env, [], []) (List.rev ps) in
       begin
-        match M.find x tycons with
-        | Type.TyFun(_, Type.App(Type.Arrow, _)) ->
-            env, Type.App(Type.Arrow, ts')
-        | Type.TyFun(_, (Type.Variant _ as t)) ->
+        match M.find x venv with
+        | Type.Poly(_, (Type.App(Type.Variant _, _) as t)) ->
             assert (ps = []);
             env, t
-        | t -> Printf.eprintf "invalid type constructor : t = %s\n" (Type.string_of_tycon t); assert false
+        | Type.Poly(_, Type.App(Type.Arrow, _)) ->
+            env, Type.App(Type.Arrow, ts')
+        | t -> Printf.eprintf "invalid type : t = %s\n" (Type.string_of_t t); assert false
       end
 
 let rec instantiate =
@@ -198,7 +198,7 @@ let rec instantiate =
   | Type.Poly(_, t) -> t
   | t -> t
 
-let rec g ({ Env.venv = venv; types = types; tycons = tycons } as env) (e, t) =
+let rec g ({ Env.venv = venv; tenv = tenv } as env) (e, t) =
   let _ = D.printf "Wrap.g %s\n" (string_of_typed_expr (e, t)) in
 
   let unary e f =
@@ -216,7 +216,7 @@ let rec g ({ Env.venv = venv; types = types; tycons = tycons } as env) (e, t) =
     | Record(xets) -> 
         let xets', ts' = List.fold_left (fun (xets, ts) (x, e) -> let e', t' = g env e in (x, (e', t')) :: xets, t' :: ts) ([], []) (List.rev xets) in 
         begin
-          match M.find (fst (List.hd xets)) types with
+          match M.find (fst (List.hd xets)) tenv with
           | Type.Poly(xs, Type.Field(rt, _)) -> 
               begin 
                 match rt with 
@@ -229,7 +229,7 @@ let rec g ({ Env.venv = venv; types = types; tycons = tycons } as env) (e, t) =
         end
     | Field(e, x) -> 
         let e' = g env e in       
-        (match M.find x types with
+        (match M.find x tenv with
         | Type.Poly(_, Type.Field(_, t')) -> 
             (unwrap (Field(e', x), t') t)
         | t -> Printf.eprintf "invalid type : t = %s\n" (Type.string_of_t t); assert false)
@@ -272,12 +272,12 @@ let rec g ({ Env.venv = venv; types = types; tycons = tycons } as env) (e, t) =
     | Constr(x, es) -> 
         let ets' = List.map (g env) es in
         begin
-          match M.find x tycons with
-          | Type.TyFun(xs, (Type.App(Type.Arrow, ys) as t)) -> 
+          match instantiate (M.find x venv) with
+          | Type.App(Type.Arrow, ys) as t -> 
               let t' = Typing.subst env (List.fold_left2 (fun env y (_, t) -> M.add_list (subst_map y t) env) M.empty (L.init ys) ets') t in
-              let r', ys' = match t' with Type.App(Type.Arrow, ys') -> L.last ys', ys' | _ -> assert false in
+              let r' = match t' with Type.App(Type.Arrow, ys') -> L.last ys' | _ -> assert false in
               (unwrap (Constr(x, List.map2 wrap ets' (L.init ys)), (L.last ys)) r')
-          | t -> Printf.eprintf "invalid type : t = %s\n" (Type.string_of_tycon t); assert false
+          | t -> Printf.eprintf "invalid type : t = %s\n" (Type.string_of_t t); assert false
         end
     | LetRec({ name = (x, ft); args = yts; body = e1 }, e2) -> 
         let e1' = g { env with Env.venv = M.add_list yts (M.add x ft venv) } e1 in
@@ -289,7 +289,7 @@ let rec g ({ Env.venv = venv; types = types; tycons = tycons } as env) (e, t) =
         (match (snd e') with 
         | Type.App(Type.Arrow, ys) ->
             let t' = Typing.subst env (List.fold_left2 (fun env y (_, t) -> M.add_list (subst_map y t) env) M.empty (L.init ys) ets') (Type.App(Type.Arrow, ys)) in
-            let r', ys' = match t' with Type.App(Type.Arrow, ys') -> L.last ys', ys' | _ -> assert false in
+            let r' = match t' with Type.App(Type.Arrow, ys') -> L.last ys' | _ -> assert false in
             (unwrap (App(e', List.map2 wrap ets' (L.init ys)), (L.last ys)) r')
         | t -> Printf.eprintf "invalid type : %s\n" (Type.string_of_t t); assert false)
     | WrapBody _ | UnwrapBody _ -> Printf.eprintf "impossible.\n"; assert false 

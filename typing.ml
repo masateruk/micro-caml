@@ -5,29 +5,36 @@ open Syntax
 exception Unify of Type.t * Type.t
 exception Error of expr * Type.t * Type.t
     
-let rec subst ({ Env.tycons = tycons } as env) tyvars t =
-  let _ = D.printf "  Typing.subst %s\n" (Type.string_of_t t) in
-  let rec subst' =
+let rec subst ({ Env.tycons = tycons } as env) tyvars reached t =
+  let () = D.printf "Typing.subst %s\n" (Type.string_of_t t) in
+  let rec subst' reached =
+    let () = D.printf "    Typing.subst' %s\n" (Type.string_of_t t) in
     function
     | Type.Var(x) when M.mem x tyvars -> M.find x tyvars
     | Type.Var(x) -> Type.Var(x)
-    | Type.Field(tr, t) -> Type.Field(subst' tr, subst' t)
-    | Type.Variant(x, ytts) -> Type.Variant(x, (List.map (fun (y, ts) -> y, List.map subst' ts) ytts))
-    | Type.App(Type.TyFun(xs, t), ys) -> subst' (subst env (M.add_list2 xs ys M.empty) t)
-    | Type.App(Type.NameTycon(x, _), ys) -> subst' (Type.App(M.find x tycons, ys))
-    | Type.App(x, ys) -> Type.App(x, (List.map subst' ys))
-    | Type.Poly([], t) -> subst' t
+    | Type.Field(tr, t) -> Type.Field(subst' reached tr, subst' reached t)
+    | Type.App(Type.Record(x, fs), ys) -> Type.App(Type.Record(x, fs), List.map (subst' (S.add x reached)) ys)
+    | Type.App(Type.Variant(x, constrs), ys) -> 
+        Type.App(Type.Variant(x, List.map (fun (c, ts) -> c, List.map (subst' (S.add x reached)) ts) constrs), List.map (subst' (S.add x reached)) ys)
+    | Type.App(Type.TyFun(xs, t), ys) -> subst' reached (subst env (M.add_list2 xs ys M.empty) reached t)
+    | Type.App(Type.NameTycon(x, _), ys) as t when S.mem x reached -> t
+    | Type.App(Type.NameTycon(x, { contents = Some(tycon) }), ys) -> subst' reached (Type.App(tycon, ys))
+    | Type.App(Type.NameTycon(x, _), ys) -> subst' reached (Type.App(M.find x tycons, ys))
+    | Type.App(x, ys) -> Type.App(x, (List.map (subst' reached) ys))
+    | Type.Poly([], t) -> subst' reached t
     | Type.Poly(xs, t) -> assert false; (* impossible *)
-    | Type.Meta{ contents = Some(t) } -> subst' t
+    | Type.Meta{ contents = Some(t) } -> subst' reached t
     | Type.Meta{ contents = None } as t -> t in
-  subst' t
+  subst' reached t
+
+let subst env tyvars = subst env tyvars S.empty
     
 let rec occur x = (* occur check (caml2html: typing_occur) *)
   function 
   | Type.Var _ -> false
   | Type.Field(_, t) -> occur x t
-  | Type.Variant(_, xtss) -> List.exists (fun (_, ts) -> (List.exists (occur x) ts)) xtss
   | Type.App(Type.TyFun(_, u), ts) -> occur x u || List.exists (occur x) ts
+  | Type.App(Type.Variant(_, constrs), ts) -> List.exists (fun (_, ts) -> List.exists (occur x) ts) constrs || List.exists (occur x) ts
   | Type.App(_, ts) -> List.exists (occur x) ts
   | Type.Poly(_, t) -> occur x t
   | Type.Meta{ contents = Some(t) } -> occur x t
@@ -42,19 +49,23 @@ let rec unify ({ Env.tycons = tycons } as env) t1 t2 = (* 型が合うように�
     | Type.App(Type.Int, xs), Type.App(Type.Int, ys) 
     | Type.App(Type.Arrow, xs), Type.App(Type.Arrow, ys) -> List.iter2 unify' xs ys
     | Type.App(Type.Record(x, fs), xs), Type.App(Type.Record(y, fs'), ys) when fs = fs' -> List.iter2 unify' xs ys
+    | Type.App(Type.Variant(x, constrs), xs), Type.App(Type.Variant(y, constrs'), ys) when x = y -> 
+        List.iter2 (fun (_, ts) (_, ts') -> List.iter2 unify' ts ts') constrs constrs';
+        List.iter2 unify' xs ys;
     | Type.App(Type.TyFun(xs, u), ys), t2 -> unify' (subst env (M.add_list2 xs ys M.empty) u) t2
     | t1, Type.App(Type.TyFun(xs, u), ys) -> unify' t1 (subst env (M.add_list2 xs ys M.empty) u)
     | Type.App(Type.NameTycon(x, _), xs), Type.App(Type.NameTycon(y, _), ys) when x = y -> List.iter2 unify' xs ys
     | Type.App(Type.NameTycon(x, { contents = None }), ys), t2 -> unify' (Type.App(M.find x tycons, ys)) t2
     | t1, Type.App(Type.NameTycon(x, { contents = None }), ys) -> unify' t1 (Type.App(M.find x tycons, ys))
+    | Type.App(Type.NameTycon(x, { contents = Some(t1) }), xs), t2 -> unify' (Type.App(t1, xs)) t2
+    | t1, Type.App(Type.NameTycon(x, { contents = Some(t2) }), ys) -> unify' t1 (Type.App(t2, ys))
     | Type.Poly([], u1), t2 -> unify' u1 t2
     | t1, Type.Poly([], u2) -> unify' t1 u2
     | Type.Poly(xs, u1), Type.Poly(ys, u2) -> unify' u1 (subst env (M.add_list2 ys (List.map (fun x -> Type.Var(x)) xs) M.empty) u2)
     | Type.Var(x), Type.Var(y) when x = y -> ()
     | Type.Field(rt1, t1), Type.Field(rt2, t2) -> unify' rt1 rt2; unify' t1 t2
-    | Type.Variant(x, xtss), Type.Variant(y, ytss) when x = y -> List.iter2 (fun (_, xs) (_, ys) -> List.iter2 unify' xs ys) xtss ytss
     | Type.Meta{ contents = Some(t1') }, t2 -> unify' t1' t2
-    | Type.Meta(x), Type.Meta{ contents = Some(t2') } -> unify' t1 t2'
+    | t1, Type.Meta{ contents = Some(t2') } -> unify' t1 t2'
     | Type.Meta(x), Type.Meta(y) when x == y -> ()
     | Type.Meta(x), t2 ->
         if occur x t2 then raise (Unify(t1, t2))
@@ -92,8 +103,10 @@ let rec generalize { Env.venv = venv; tycons = tycons } t =
     function
     | Type.Var _ -> vs
     | Type.Field(_, t) -> metavars vs t
-    | Type.Variant(_, ytss) -> List.fold_left (fun vs (_, ts) -> List.fold_left metavars vs ts) vs ytss
     | Type.App(Type.TyFun(_, u), ts) -> List.fold_left metavars (metavars vs u) ts
+    | Type.App(Type.Variant(_, constrs), ts) -> 
+        let vs = List.fold_left (fun vs (_, ts) -> List.fold_left metavars vs ts) vs constrs in
+        List.fold_left metavars vs ts
     | Type.App(_, ts) -> List.fold_left metavars vs ts
     | Type.Poly(_, t) -> metavars vs t
     | Type.Meta{ contents = Some(t') } -> metavars vs t'
@@ -123,25 +136,67 @@ let rec instantiate env t =
   t
       
 (* for pretty printing (and type normalization) *)
-let rec deref_tycon ({ Env.tycons = tycons } as env) =
-  function
-  | Type.Int | Type.Bool | Type.Unit | Type.Arrow | Type.Tuple | Type.Record _ as tycon -> tycon
-  | Type.NameTycon(x, { contents = Some(tycon) }) -> tycon
-  | Type.NameTycon(x, { contents = None }) -> M.find x tycons
-  | Type.TyFun(xs, t) -> Type.TyFun(xs, deref_type env t)
+let rec deref_tycon ({ Env.tycons = tycons } as env) reached tycon =
+  let () = D.printf "    Typing.deref_tycon %s\n" (Type.string_of_tycon tycon) in
+  match tycon with
+  | Type.Int | Type.Bool | Type.Unit | Type.Arrow | Type.Tuple as tycon -> tycon, reached
+  | Type.Record(x, _) as tycon -> tycon, M.add x tycon reached
+  | Type.Variant(x, _) when M.mem x reached -> M.find x reached, reached (* ??? *)
+  | Type.Variant(x, constrs) as tycon ->
+      let reached = M.add x tycon reached in
+      let constrs', reached = 
+        List.fold_left (fun (constrs, reached) (c, ys) -> 
+          let ys', reached = 
+            List.fold_left 
+              (fun (ys', reached) y -> 
+                let y', reached = deref_type env reached y in 
+                y'::ys', reached) ([], reached) (List.rev ys) in
+          (c, ys') :: constrs, reached) ([], reached) (List.rev constrs) in
+      let tycon' = Type.Variant(x, constrs') in
+      tycon', reached
+  | Type.NameTycon(x, { contents = Some(tycon) }) -> tycon, M.add x tycon reached
+  | Type.NameTycon("int", { contents = None }) -> M.find "int" tycons, reached
+  | Type.NameTycon("bool", { contents = None }) -> M.find "bool" tycons, reached
+  | Type.NameTycon(x, r) when M.mem x reached -> 
+      let tycon = M.find x reached in 
+      r := Some(tycon);
+      tycon, reached
+  | Type.NameTycon(x, { contents = None }) -> assert false
+  | Type.TyFun(xs, t) -> 
+      let t', reached' = deref_type env reached t in
+        Type.TyFun(xs, t'), reached'
   
-and deref_type env = (* 型変数を中身でおきかえる関数 (caml2html: typing_deref) *)
-  function
-  | Type.Var(x) -> Type.Var(x)
-  | Type.Field(x, t) -> Type.Field(x, deref_type env t)
-  | Type.Variant(x, ytss) -> Type.Variant(x, List.map (fun (y, ts) -> y, List.map (deref_type env) ts) ytss)
-  | Type.App(x, ys) -> Type.App(deref_tycon env x, List.map (deref_type env) ys)
-  | Type.Poly(xs, t) -> Type.Poly(xs, deref_type env t)
+and deref_type env reached t = (* 型変数を中身でおきかえる関数 (caml2html: typing_deref) *)
+  let () = D.printf "    Typing.deref_type %s\n" (Type.string_of_t t) in
+  match t with
+  | Type.Var(x) -> Type.Var(x), reached
+  | Type.Field(x, t) -> 
+      let t', reached' = deref_type env reached t in 
+      Type.Field(x, t'), reached'
+  | Type.App(x, ys) -> 
+      let x', reached = deref_tycon env reached x in
+      let ys', reached = List.fold_left (fun (ys', reached) y -> let y', reached = deref_type env reached y in y'::ys', reached) ([], reached) (List.rev ys) in
+      Type.App(x', ys'), reached
+  | Type.Poly(xs, t) -> 
+      let t', reached' = deref_type env reached t in
+      Type.Poly(xs, t'), reached'
   | Type.Meta({ contents = None }) -> assert false (* It's impossible because type is generalized. So if it happen, then it could be a bug. *)
   | Type.Meta({ contents = Some(t) } as r) ->
-      let t' = deref_type env t in
+      let t', reached' = deref_type env reached t in
       r := Some(t');
-      t'
+      t', reached'
+
+let deref_tycon env tycon = 
+  let () = D.printf "Typing.deref_tycon %s\n" (Type.string_of_tycon tycon) in
+  let tycon', _ = deref_tycon env M.empty tycon in
+  let () = D.printf " => %s\n" (Type.string_of_tycon tycon') in
+  tycon'
+
+let deref_type env t = 
+  let () = D.printf "Typing.deref_type %s\n" (Type.string_of_t t) in
+  let t', _ = deref_type env M.empty t in
+  let () = D.printf " => %s\n" (Type.string_of_t t') in
+  t'
 
 let rec deref_pattern env =
   function
@@ -194,7 +249,7 @@ and deref_expr ({ Env.venv = venv } as env) =
   | WrapBody(x, t) -> WrapBody(x, deref_type env t)
   | UnwrapBody(x, t) -> UnwrapBody(x, deref_type env t)
 
-let rec pattern ({ Env.venv = venv; types = types; tycons = tycons } as env) p =
+let rec pattern ({ Env.venv = venv; tenv = tenv } as env) p =
   let _ = D.printf "Typing.pattern (%s)\n" (string_of_pattern p) in
   match p with
   | PtBool(b) -> env, Type.App(Type.Bool, [])
@@ -206,7 +261,7 @@ let rec pattern ({ Env.venv = venv; types = types; tycons = tycons } as env) p =
   | PtRecord(xps) -> 
       let env', ts' = List.fold_left (fun (env, ts) (_, p) -> let env', t' = pattern env p in env', t' :: ts) (env, []) (List.rev xps) in
       begin
-        match M.find (fst (List.hd xps)) types with
+        match M.find (fst (List.hd xps)) tenv with
         | Type.Poly(xs, Type.Field(t, _)) ->
             let t' = instantiate env (Type.Poly(xs, t)) in
             begin
@@ -219,33 +274,28 @@ let rec pattern ({ Env.venv = venv; types = types; tycons = tycons } as env) p =
         | t -> Printf.eprintf "invalid type : t = %s\n" (Type.string_of_t t); assert false
       end
   | PtConstr(x, ps) -> 
-      let env, pts' = List.fold_left (fun (env, pts) p -> let env', t' = pattern env p in env', (p, t') :: pts) (env, []) (List.rev ps) in
+      let env', pts' = List.fold_left (fun (env, pts) p -> let env', t' = pattern env p in env', (p, t') :: pts) (env, []) (List.rev ps) in
       begin
-        match M.find x tycons with
-        | Type.TyFun(xs, _) as t -> 
-            let xs' = List.map (fun _ -> Type.Meta(Type.newmetavar ())) xs in
-            let t' = subst env M.empty (Type.App(t, xs')) in
-            begin
-              match t' with
-              | Type.Variant(_, ytss) -> 
-                  let _, ts = List.find (fun (y, _) -> x = y) ytss in
-                  assert (ts = []);
-                  env, t'
-              | Type.App(Type.Arrow, ys) -> 
-                  begin 
-                    match L.last ys with
-                    | Type.Variant(_, ytss) as t -> 
-                        let _, ts' = List.find (fun (y, _) -> x = y) ytss in
-                        List.iter2 (fun (_, t) t' -> unify env t t') pts' ts';
-                        env, t
-                    | t -> Printf.eprintf "invalid type : %s\n" (Type.string_of_t t); assert false
-                  end
+        match instantiate env (M.find x venv) with
+        | Type.App(Type.Variant(_, constrs), _) as t -> 
+            assert (ps = []);
+            assert (List.exists (function (y, []) -> x = y | _ -> false) constrs);
+            env, t
+        | Type.App(Type.Arrow, ys) -> 
+            begin 
+              match L.last ys with
+              | Type.App(Type.Variant(_, constrs), _) as t -> 
+                  List.iter
+                    (function
+                    | y, ts' when x = y -> List.iter2 (fun (_, t) t' -> unify env' t t') pts' ts'
+                    | _  -> ()) constrs;
+                  env', t
               | t -> Printf.eprintf "invalid type : %s\n" (Type.string_of_t t); assert false
             end
-        | t -> Printf.eprintf "invalid type constructor : t = %s\n" (Type.string_of_tycon t); assert false
+        | t -> Printf.eprintf "invalid type : %s\n" (Type.string_of_t t); assert false
       end
-      
-let rec g ({ Env.venv = venv; types = types; tycons = tycons } as env) ((e:expr), t) = (* 型推論ルーチン (caml2html: typing_g) *)
+        
+let rec g ({ Env.venv = venv; tenv = tenv } as env) ((e:expr), t) = (* 型推論ルーチン (caml2html: typing_g) *)
   let _ = D.printf "Typing.g %s\n" (string_of_expr e) in
   try
     let e', t' =
@@ -258,7 +308,7 @@ let rec g ({ Env.venv = venv; types = types; tycons = tycons } as env) ((e:expr)
           let xets', ts' = List.fold_left 
             (fun (xets, ts) (x, e) -> let e', t' = g env e in (x, (e', t')) :: xets, t' :: ts) ([], []) (List.rev xets) in 
           begin
-            match M.find (fst (List.hd xets)) types with
+            match M.find (fst (List.hd xets)) tenv with
             | Type.Poly(xs, Type.Field(t, _)) -> 
                 let t' = instantiate env (Type.Poly(xs, t)) in
                 begin
@@ -272,7 +322,7 @@ let rec g ({ Env.venv = venv; types = types; tycons = tycons } as env) ((e:expr)
           end
       | Field(e, x) ->
           let e', t' = g env e in
-          let tf = instantiate env (M.find x types) in
+          let tf = instantiate env (M.find x tenv) in
           let t2 = Type.Meta(Type.newmetavar ()) in
           unify env tf (Type.Field(t', t2));
           Field((e', t'), x), t2
@@ -376,29 +426,15 @@ let rec g ({ Env.venv = venv; types = types; tycons = tycons } as env) ((e:expr)
           Env.extenv := M.add x t !Env.extenv;
           e, instantiate env t
       | Constr(x, []) -> 
-          e, begin
-            match M.find x tycons with
-            | Type.TyFun(xs, t) -> 
-                let xs' = List.map (fun _ -> Type.Meta(Type.newmetavar ())) xs in
-                let t' = subst env (M.add_list2 xs xs' M.empty) t in
-                t'
-            | t -> Printf.eprintf "invalid type constructor : t = %s\n" (Type.string_of_tycon t); assert false
-          end
+          e, instantiate env (M.find x venv)
       | Constr(x, ets) -> 
           let ets', ts' = List.fold_left (fun (ets, ts) e -> let e', t' = g env e in (e', t') :: ets, t' :: ts) ([], []) (List.rev ets) in
           begin
-            match M.find x tycons with
-            | Type.TyFun(xs, (Type.App(Type.Arrow, ys) as t)) -> 
-                let xs' = List.map (fun _ -> Type.Meta(Type.newmetavar ())) xs in
-                let t' = subst env (M.add_list2 xs xs' M.empty) t in
-                begin
-                  match t' with
-                  | Type.App(Type.Arrow, ys) -> 
-                      List.iter2 (unify env) ts' (L.init ys);
-                      Constr(x, ets'), (L.last ys)
-                  | t -> Printf.eprintf "invalid type : t = %s\n" (Type.string_of_t t); assert false
-                end
-            | t -> Printf.eprintf "invalid type constructor : t = %s\n" (Type.string_of_tycon t); assert false
+            match instantiate env (M.find x venv) with
+            | Type.App(Type.Arrow, ys) -> 
+                List.iter2 (unify env) ts' (L.init ys);
+                Constr(x, ets'), (L.last ys)
+            | t -> Printf.eprintf "invalid type : t = %s\n" (Type.string_of_t t); assert false
           end
       | LetRec({ name = (x, t); args = yts; body = et1 }, et2) -> (* let recの型推論 (caml2html: typing_letrec) *)
           let t2 = Type.Meta(Type.newmetavar()) in
@@ -432,7 +468,8 @@ let f' env (et, t) =
   with Unify _ -> failwith "type error."
     
 let f = 
-  fold (fun ({ Env.venv = venv; types = types; tycons = tycons } as env, defs) def ->
+  fold (fun ({ Env.venv = venv; tenv = tenv; tycons = tycons } as env, defs) def ->
+    let () = D.printf "Typing.f %s\n" (string_of_def def) in
     let def' = 
       match def with
       | TypeDef(x, t) -> 

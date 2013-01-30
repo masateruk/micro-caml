@@ -250,13 +250,13 @@ let f' { Env.venv = venv } e = g venv S.empty e
 let f defs =
   toplevel := [];
   let _ = KNormal.fold
-    (fun ({ Env.venv = venv; types = types; tycons = tycons } as env, defs) def ->
+    (fun ({ Env.venv = venv; tenv = tenv } as env, defs) def ->
       let env', def' = 
         match def with 
         | KNormal.TypeDef(x, t) -> 
-            { env with
-              Env.types  = M.add_list (Type.types t) types;
-              Env.tycons = M.add_list ((x, t) :: (Type.tycons t)) tycons },
+            { env with 
+              Env.venv = M.add_list (Type.vars t) venv; 
+              Env.tenv = M.add_list (Type.types t) tenv }, 
           TypeDef(x, t)
         | KNormal.VarDef((x, t), e) -> 
             Env.add_var_type env x t, (VarDef((x, t), f' env e))

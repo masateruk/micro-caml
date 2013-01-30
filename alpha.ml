@@ -89,7 +89,7 @@ let f =
   let f' (ids, defs) =
     function
     | TypeDef(x, t) -> 
-        (add_list (x :: (List.map fst (Type.tycons t))) ids),  TypeDef(x, t) :: defs
+        (add x (genid x ids) ids), TypeDef(x, t) :: defs
     | VarDef((x, t), e) -> 
         (add x (genid x ids) ids), VarDef((x, t), g ids e) :: defs
     | RecDef({ name = (x, t); args = yts; body = e1 }) -> 
