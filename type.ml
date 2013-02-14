@@ -43,7 +43,7 @@ and string_of_tycon reached =
   | Tuple -> "Tuple"
   | Record(x, fs) -> "Record(" ^ x ^ ", {" ^ (String.concat ", " fs) ^ "})"
   | Variant(x, constrs) when S.mem x reached -> "Variant(" ^ x ^ ")"
-  | Variant(x, constrs) -> "Variant(" ^ x ^ ", " ^ (String.concat " | " (List.map (string_of_constr (S.add x reached)) constrs))
+  | Variant(x, constrs) -> "Variant(" ^ x ^ ", " ^ (String.concat " | " (List.map (string_of_constr (S.add x reached)) constrs)) ^ ")"
   | TyFun(xs, t) -> "TyFun(" ^ (String.concat ", " xs) ^ ", " ^ (string_of_t reached t) ^ ")"
   | NameTycon(x, { contents = None }) when S.mem x reached -> "NameTycon(" ^ x ^ ", _)"
   | NameTycon(x, { contents = None }) -> "NameTycon(" ^ x ^ ", None)"

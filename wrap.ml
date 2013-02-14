@@ -274,7 +274,7 @@ let rec g ({ Env.venv = venv; tenv = tenv } as env) (e, t) =
         begin
           match instantiate (M.find x venv) with
           | Type.App(Type.Arrow, ys) as t -> 
-              let t' = Typing.subst env (List.fold_left2 (fun env y (_, t) -> M.add_list (subst_map y t) env) M.empty (L.init ys) ets') t in
+              let t' = Typing.subst env (List.fold_left2 (fun tyvars y (_, t) -> M.add_list (subst_map y t) tyvars) M.empty (L.init ys) ets') t in
               let r' = match t' with Type.App(Type.Arrow, ys') -> L.last ys' | _ -> assert false in
               (unwrap (Constr(x, List.map2 wrap ets' (L.init ys)), (L.last ys)) r')
           | t -> Printf.eprintf "invalid type : t = %s\n" (Type.string_of_t t); assert false

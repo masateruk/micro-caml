@@ -401,7 +401,7 @@ let rec insert_let (e, t) k =
   | Let(yt, e1, e2), _ ->
       let e3, t3 = insert_let (e2, t) k in
       Let(yt, e1, e3), t3
-  | e, CType.Box when not !enable_gc ->
+  | e, t when (CType.is_ref_pointer t) && (not !enable_gc) ->
       let x = gentmp t in
       let e2, t2 = k ((Var(x)), t) in
       Let((x, t), e, e2), t2
@@ -416,13 +416,13 @@ let rec insert_dec (e, t) k =
   | e -> k (e, t)
       
 (* 文で値を返すために戻り値に代入する文を挿入する *)
-let rec insert_assign e s = 
+let rec insert_assign (e, t) s = 
   match s with
   | Exp(exp) when exp = failure -> s
-  | Exp(exp) -> Assign(e, exp)
-  | If(pred, s1, s2) -> If(pred, insert_assign e s1, insert_assign e s2)
-  | Seq(s1, s2) -> Seq(s1, insert_assign e s2)
-  | Block(decs, s) -> Block(decs, insert_assign e s)
+  | Exp(exp) -> assign (e, t) exp
+  | If(pred, s1, s2) -> If(pred, insert_assign (e, t) s1, insert_assign (e, t) s2)
+  | Seq(s1, s2) -> Seq(s1, insert_assign (e, t) s2)
+  | Block(decs, s) -> Block(decs, insert_assign (e, t) s)
   | Dec _ | Assign _ | Return _ -> Printf.eprintf "invalid statement : %s\n" (string_of_statement 0 s); assert false
     
 (* if文で値を返すための変換 *)
@@ -439,7 +439,7 @@ let rec translate_if (s, t) =
         match t with
         | CType.Void -> block_if_body s, t
         | t -> let x = gentmp t in 
-               let s' = block_if_body (insert_assign (Var(x)) s) in
+               let s' = block_if_body (insert_assign (Var(x), t) s) in
                (Seq(Dec((x, t), None), Seq(s', Exp(Var(x))))), t
       end
   | _ -> Printf.eprintf "invalid statement : %s\n" (string_of_statement 0 s); assert false

@@ -16,7 +16,7 @@
 
 #if DEBUG
 
-void* debug_malloc(size_t size, char* file, int line);
+void* debug_malloc(size_t size, const char* file, int line);
 void debug_free(void* p);
 
 #define D_MALLOC(size) debug_malloc(size, __FILE__, __LINE__)
@@ -33,6 +33,27 @@ typedef struct ref_base_t {
     void (*destructor)(struct ref_base_t* );
 } ref_base_t;
 
+#if DEBUG
+
+static inline ref_base_t* debug_new_ref_base(int size, void (*destructor)(ref_base_t*), const char* file, int line)
+{
+    ref_base_t* p = (ref_base_t*)debug_malloc(size, file, line);
+    p->count = 1;
+    p->destructor = destructor;
+    return p;
+}
+
+static inline void debug_delete_ref_base(ref_base_t* base)
+{
+    base->destructor(base);
+    debug_free(base);
+}
+
+#define new_ref_base(size, destructor) debug_new_ref_base(size, destructor, __FILE__, __LINE__)
+#define delete_ref_base(base) debug_delete_ref_base(base)
+
+#else
+
 static inline ref_base_t* new_ref_base(int size, void (*destructor)(ref_base_t*))
 {
     ref_base_t* p = (ref_base_t*)D_MALLOC(size);
@@ -47,8 +68,11 @@ static inline void delete_ref_base(ref_base_t* base)
     D_FREE(base);
 }
 
+#endif
+
 static inline void ref_base_add_ref(ref_base_t* base)
 {
+    assert(base->count != 0);
     base->count++;
 }
 

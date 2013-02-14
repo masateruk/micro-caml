@@ -58,7 +58,7 @@ clean_test: clean
 	gcc $*.c -c -o $*.o $(CFLAGS)
 
 %.out: %.o
-	gcc $(LDFLAGS) -o $*.out $*.o
+	gcc -o $*.out $*.o $(LDFLAGS) 
 
 %.log: %.out
 ifeq ($(UNAME), Darwin)

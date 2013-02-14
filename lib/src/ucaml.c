@@ -10,13 +10,14 @@ enum {
 
 typedef struct {
   void* p;
+  int size;
   char* file;
   int line;
 } meminfo_t;
 
 static meminfo_t* slots[NUM_OF_SLOTS] = { 0 };
 
-void* debug_malloc(size_t size, char* file, int line)
+void* debug_malloc(size_t size, const char* file, int line)
 {
   int i;
   
@@ -29,6 +30,7 @@ void* debug_malloc(size_t size, char* file, int line)
       assert(m != NULL);
 
       m->p = p;
+      m->size = size;
       m->file = strdup(file);
       m->line = line;
       
@@ -48,6 +50,7 @@ void debug_free(void* p)
   for (i = 0; i < NUM_OF_SLOTS; ++i) {
     if (slots[i] && slots[i]->p == p) {
 
+      memset(slots[i]->p, 0xffffffff, slots[i]->size);
       free(slots[i]->p);
       free(slots[i]->file);
       

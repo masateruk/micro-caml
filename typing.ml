@@ -7,23 +7,25 @@ exception Error of expr * Type.t * Type.t
     
 let rec subst ({ Env.tycons = tycons } as env) tyvars reached t =
   let () = D.printf "Typing.subst %s\n" (Type.string_of_t t) in
-  let rec subst' reached =
-    let () = D.printf "    Typing.subst' %s\n" (Type.string_of_t t) in
-    function
+  let rec subst' reached ty = 
+    let () = D.printf "    Typing.subst' %s\n" (Type.string_of_t ty) in
+    match ty with
     | Type.Var(x) when M.mem x tyvars -> M.find x tyvars
     | Type.Var(x) -> Type.Var(x)
     | Type.Field(tr, t) -> Type.Field(subst' reached tr, subst' reached t)
     | Type.App(Type.Record(x, fs), ys) -> Type.App(Type.Record(x, fs), List.map (subst' (S.add x reached)) ys)
     | Type.App(Type.Variant(x, constrs), ys) -> 
-        Type.App(Type.Variant(x, List.map (fun (c, ts) -> c, List.map (subst' (S.add x reached)) ts) constrs), List.map (subst' (S.add x reached)) ys)
+        let constrs' = List.map (fun (c, ts) -> c, List.map (fun t -> subst' (S.add x reached) t) ts) constrs in
+        Type.App(Type.Variant(x, constrs'), List.map (subst' (S.add x reached)) ys)
     | Type.App(Type.TyFun(xs, t), ys) -> subst' reached (subst env (M.add_list2 xs ys M.empty) reached t)
-    | Type.App(Type.NameTycon(x, _), ys) as t when S.mem x reached -> t
+    | Type.App(Type.NameTycon(x, _) as t, ys) when S.mem x reached -> Type.App(t, List.map (subst' reached) ys)
     | Type.App(Type.NameTycon(x, { contents = Some(tycon) }), ys) -> subst' reached (Type.App(tycon, ys))
     | Type.App(Type.NameTycon(x, _), ys) -> subst' reached (Type.App(M.find x tycons, ys))
     | Type.App(x, ys) -> Type.App(x, (List.map (subst' reached) ys))
     | Type.Poly([], t) -> subst' reached t
     | Type.Poly(xs, t) -> assert false; (* impossible *)
-    | Type.Meta{ contents = Some(t) } -> subst' reached t
+    | Type.Meta{ contents = Some(t) } -> 
+        subst' reached t
     | Type.Meta{ contents = None } as t -> t in
   subst' reached t
 
@@ -41,8 +43,9 @@ let rec occur x = (* occur check (caml2html: typing_occur) *)
   | Type.Meta(y) -> x == y
       
 let rec unify ({ Env.tycons = tycons } as env) t1 t2 = (* 型が合うように、メタ型変数への代入をする. 成功したら () を返す. (caml2html: typing_unify) *)
-  let _ = D.printf "    Typing.unify %s %s\n" (Type.string_of_t t1) (Type.string_of_t t2) in
+  let _ = D.printf "Typing.unify %s %s\n" (Type.string_of_t t1) (Type.string_of_t t2) in
   let rec unify' t1 t2 =  
+    let _ = D.printf "    Typing.unify' %s %s\n" (Type.string_of_t t1) (Type.string_of_t t2) in
     match t1, t2 with
     | Type.App(Type.Unit, xs), Type.App(Type.Unit, ys) 
     | Type.App(Type.Bool, xs), Type.App(Type.Bool, ys) 
@@ -141,9 +144,9 @@ let rec deref_tycon ({ Env.tycons = tycons } as env) reached tycon =
   match tycon with
   | Type.Int | Type.Bool | Type.Unit | Type.Arrow | Type.Tuple as tycon -> tycon, reached
   | Type.Record(x, _) as tycon -> tycon, M.add x tycon reached
-  | Type.Variant(x, _) when M.mem x reached -> M.find x reached, reached (* ??? *)
-  | Type.Variant(x, constrs) as tycon ->
-      let reached = M.add x tycon reached in
+  | Type.Variant(x, _) when M.mem x reached -> 
+      tycon, reached
+  | Type.Variant(x, constrs) ->
       let constrs', reached = 
         List.fold_left (fun (constrs, reached) (c, ys) -> 
           let ys', reached = 
@@ -154,7 +157,8 @@ let rec deref_tycon ({ Env.tycons = tycons } as env) reached tycon =
           (c, ys') :: constrs, reached) ([], reached) (List.rev constrs) in
       let tycon' = Type.Variant(x, constrs') in
       tycon', reached
-  | Type.NameTycon(x, { contents = Some(tycon) }) -> tycon, M.add x tycon reached
+  | Type.NameTycon(x, { contents = Some(tycon) }) ->       
+      tycon, M.add x tycon reached
   | Type.NameTycon("int", { contents = None }) -> M.find "int" tycons, reached
   | Type.NameTycon("bool", { contents = None }) -> M.find "bool" tycons, reached
   | Type.NameTycon(x, r) when M.mem x reached -> 
@@ -162,6 +166,19 @@ let rec deref_tycon ({ Env.tycons = tycons } as env) reached tycon =
       r := Some(tycon);
       tycon, reached
   | Type.NameTycon(x, { contents = None }) -> assert false
+  | Type.TyFun(xs, Type.App(Type.Variant(x, constrs), ys)) -> 
+      let reached = M.add x tycon reached in
+      let constrs', reached = 
+        List.fold_left (fun (constrs, reached) (c, ys) -> 
+          let ys', reached = 
+            List.fold_left 
+              (fun (ys', reached) y -> 
+                let y', reached = deref_type env reached y in 
+                y'::ys', reached) ([], reached) (List.rev ys) in
+          (c, ys') :: constrs, reached) ([], reached) (List.rev constrs) in
+      let ys', reached = List.fold_left (fun (ys', reached) y -> let y', reached = deref_type env reached y in y'::ys', reached) ([], reached) (List.rev ys) in
+      let tycon' = Type.TyFun(xs, Type.App(Type.Variant(x, constrs'), ys')) in
+      tycon', reached
   | Type.TyFun(xs, t) -> 
       let t', reached' = deref_type env reached t in
         Type.TyFun(xs, t'), reached'
@@ -176,7 +193,7 @@ and deref_type env reached t = (* 型変数を中身でおきかえる関数 (ca
   | Type.App(x, ys) -> 
       let x', reached = deref_tycon env reached x in
       let ys', reached = List.fold_left (fun (ys', reached) y -> let y', reached = deref_type env reached y in y'::ys', reached) ([], reached) (List.rev ys) in
-      Type.App(x', ys'), reached
+      subst env M.empty (Type.App(x', ys')), reached
   | Type.Poly(xs, t) -> 
       let t', reached' = deref_type env reached t in
       Type.Poly(xs, t'), reached'
