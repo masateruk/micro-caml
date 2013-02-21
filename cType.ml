@@ -81,6 +81,6 @@ let rec prefix =
   | Struct("", _, _) -> "st"
   | Struct(x, _, _) -> x
   | Union _ -> "u"
-  | Box -> "v" 
+  | Box -> "p" 
   | Pointer _ -> "p"
   | Pseudo -> assert false

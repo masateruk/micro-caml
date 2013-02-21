@@ -202,12 +202,19 @@ let block s =
   Block(List.rev decs, release_boxes decs s')
 
 let wrap_body x t = 
+  if CType.is_ref_pointer t then
+  (Exp(Cast(CType.Box, Var(x))))
+  else
   (Seq(Dec(("p", CType.Box), None), 
-       Seq(Assign(Var("p"), CallDir(Var("new_sp"), [Sizeof(t)])),
+       Seq(Assign(Var("p"), CallDir(Var("new_box"), [Sizeof(t)])),
            Seq(Assign(Deref(Cast(CType.Pointer(t), CallDir(Var("sp_get"), [Var("p")]))), Var(x)),
                Exp(Var("p"))))))
     
+    
 let unwrap_body x t = 
+  if CType.is_ref_pointer t then
+  (Exp(Cast(t, Var(x))))
+  else
   (Exp(Deref(Cast(CType.Pointer(t), CallDir(Var("sp_get"), [Var(x)])))))
 
 let rec concat s1 (x, t) s2 = 
@@ -569,6 +576,7 @@ let rec g' (venv, tenv as env) ids (e, t) = (* C言語の式生成 (caml2html: c
   | Closure.Constr(x, []) when M.mem (Id.to_upper x) venv -> 
       Var(Id.to_upper x), M.find (Id.to_upper x) venv
   | Closure.Constr(x, es) -> 
+      let () = D.printf "%s 's type = %s\n" x (CType.string_of_t (M.find x venv)) in
       insert_lets es (fun ets' -> CallDir(Var(x), (List.map fst ets')), return_type (M.find x venv))
   | Closure.App(e, ys) -> 
       let ce = e in

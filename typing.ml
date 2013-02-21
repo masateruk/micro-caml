@@ -197,7 +197,8 @@ and deref_type env reached t = (* 型変数を中身でおきかえる関数 (ca
   | Type.Poly(xs, t) -> 
       let t', reached' = deref_type env reached t in
       Type.Poly(xs, t'), reached'
-  | Type.Meta({ contents = None }) -> assert false (* It's impossible because type is generalized. So if it happen, then it could be a bug. *)
+  | Type.Meta({ contents = None }) -> 
+      Type.Var(Type.newtyvar ()), reached
   | Type.Meta({ contents = Some(t) } as r) ->
       let t', reached' = deref_type env reached t in
       r := Some(t');
@@ -215,8 +216,9 @@ let deref_type env t =
   let () = D.printf " => %s\n" (Type.string_of_t t') in
   t'
 
-let rec deref_pattern env =
-  function
+let rec deref_pattern env p =
+  let () = D.printf "Typing.deref_pattern %s\n" (string_of_pattern p) in
+  match p with
   | PtBool _ | PtInt _ as p -> p, env
   | PtVar(x, t) -> PtVar(x, deref_type env t), Env.add_var_type env x t
   | PtTuple(ps) -> 

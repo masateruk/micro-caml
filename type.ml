@@ -60,7 +60,7 @@ let string_of_constr = string_of_constr S.empty
       
 let rec prefix = 
   function
-  | Var _ -> "v" 
+  | Var _ -> "p" 
   | Field(_, t) -> prefix t
   | App(tycon, _) -> prefix_of_tycon tycon
   | Poly(_, t) -> prefix t

@@ -91,29 +91,33 @@ typedef struct {
     void* p;
 } box_t;
 
-typedef box_t* sp_t;
+typedef ref_base_t* sp_t;
 
-static inline void delete_sp(ref_base_t* base)
+static inline void delete_box(sp_t p)
 {
-    box_t* b = (box_t*)base;
+    box_t* b = (box_t*)p;
     D_FREE(b->p);
 }
 
-static inline sp_t new_sp(int size)
+static inline sp_t new_box(int size)
 {
-    box_t* b = (box_t*)new_ref_base(sizeof(box_t), delete_sp);
+    box_t* b = (box_t*)new_ref_base(sizeof(box_t), delete_box);
 
     b->p = D_MALLOC(size);
     assert(b->p != NULL);
 
-    return b;
+    return (sp_t)b;
 }
 
-#define sp_get(b) ((b)->p)
-#define sp_count(b) ((b)->count)
+static inline void* sp_get(sp_t p)
+{
+    assert(((ref_base_t*)p)->count != 0);
+    return ((box_t*)p)->p;
+}
 
-static inline void print_int(int x) { 
-  printf("%d", x); 
+static inline void print_int(int x)
+{ 
+    printf("%d", x); 
 }
 
 #endif

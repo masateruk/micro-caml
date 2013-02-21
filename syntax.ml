@@ -93,12 +93,13 @@ let rec string_of_def = function
 let fold f defs =
   let _, defs' = 
     List.fold_left
-      (fun ({ Env.venv = venv; tenv = tenv } as env, defs) def -> 
+      (fun ({ Env.venv = venv; tenv = tenv; tycons = tycons } as env, defs) def -> 
         match def with
         | TypeDef(x, t) -> 
-            { env with 
-              Env.venv = M.add_list (Type.vars t) venv;
-              Env.tenv = M.add_list (Type.types t) tenv }, 
+            { Env.venv = M.add_list (Type.vars t) venv;
+              Env.tenv = M.add_list (Type.types t) tenv;
+              Env.tycons = M.add x t tycons;
+            }, 
           f (env, defs) def
         | VarDef((x, t), e) -> 
             Env.add_var_type env x t, f (env, defs) def
