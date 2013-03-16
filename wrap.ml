@@ -4,9 +4,8 @@ open Syntax
 
 let wrappers = Hashtbl.create 64
 let unwrappers = Hashtbl.create 64
-
 let wrapper_defs = ref []
-  
+    
 let gen_wrapper s t = 
   let x, t' = 
     match t with
@@ -22,7 +21,7 @@ let gen_wrapper s t =
     | t -> Printf.eprintf "not implemented. t = %s\n" (Type.string_of_t t); assert false in
   let ft = Type.App(Type.Arrow, [t'; s]) in  
   let y = Id.gentmp (Type.prefix t') in  
-  (Var(x), ft), RecDef({ name = (x, ft); args = [(y, t')]; body = WrapBody(y, t'), t })
+  (x, ft), RecDef({ name = (x, ft); args = [(y, t')]; body = WrapBody(y, t'), t })
     
 let gen_unwrapper s t = 
   let x, t = 
@@ -39,26 +38,25 @@ let gen_unwrapper s t =
     | t -> Printf.eprintf "not implemented. t = %s\n" (Type.string_of_t t); assert false in
   let ft = Type.App(Type.Arrow, [s; t]) in  
   let y = Id.gentmp (Type.prefix s) in  
-  (Var(x), ft), RecDef({ name = (x, ft); args = [(y, s)]; body = UnwrapBody(y, t), t })
+  (x, ft), RecDef({ name = (x, ft); args = [(y, s)]; body = UnwrapBody(y, t), t })
 
-let generalize env =
-  function
-  | Type.App(Type.Variant(x, _), _) when Env.exists_tycon env x -> 
-      begin 
-        match Env.find_tycon env x with
-        | Type.TyFun(_, (Type.App(Type.Variant(_, _), _) as t)) -> t
-        | t -> Printf.eprintf "invalid type constructor : %s\n" (Type.string_of_tycon t); assert false
-      end
-  | t -> t
-    
 let find_wrapper env table s t generator =
+  let generalize env =
+    function
+    | Type.App(Type.Variant(x, _), _) when Env.exists_tycon env x -> 
+        begin 
+          match Env.find_tycon env x with
+          | Type.TyFun(_, (Type.App(Type.Variant(_, _), _) as t)) -> t
+          | t -> Printf.eprintf "invalid type constructor : %s\n" (Type.string_of_tycon t); assert false
+        end
+    | t -> t in
   let t = generalize env t in
   try
-    let () = D.printf "try to find %s\n" (Type.string_of_t t) in
     Hashtbl.find table t
   with
     Not_found ->
-      let expr, def = generator s t in
+      let (x, ft), def = generator s t in
+      let expr = Var(x), ft in
       Hashtbl.add table t expr;
       wrapper_defs := def :: !wrapper_defs;
       expr
@@ -176,7 +174,7 @@ let rec pattern ({ Env.venv = venv; tenv = tenv } as env) p =
   match p with
   | PtBool(b) -> env, Type.App(Type.Bool, [])
   | PtInt(n) -> env, Type.App(Type.Int, [])
-  | PtVar(x, t) -> Env.add_var_type env x t, t
+  | PtVar(x, t) -> Env.add_var env x t, t
   | PtTuple(ps) -> 
       let env, _, ts' = List.fold_left (fun (env, ps, ts) p -> let env', t' = pattern env p in env', p :: ps, t' :: ts) (env, [], []) (List.rev ps) in
       env, Type.App(Type.Tuple, ts')
@@ -276,9 +274,9 @@ let rec g ({ Env.venv = venv; tenv = tenv } as env) (e, t) =
         Match(e', List.map2 (fun (_, (_, t)) (p', e') -> p', unwrap env e' t) pes pes'), t
     | LetVar((x, t), e1, e2) -> 
         let e1' = g env e1 in
-        let e2' = g (Env.add_var_type env x t) e2 in
+        let e2' = g (Env.add_var env x t) e2 in
         LetVar((x, t), e1', e2'), (snd e2')
-    | Var(x) when M.mem x !Env.extenv -> Var(x), instantiate (M.find x !Env.extenv)
+    | Var(x) when M.mem x !Env.extenv.Env.venv -> Var(x), instantiate (M.find x !Env.extenv.Env.venv)
     | Var(x) -> Var(x), instantiate (M.find x venv)
     | Constr(x, []) -> Constr(x, []), t
     | Constr(x, es) -> 
@@ -293,7 +291,7 @@ let rec g ({ Env.venv = venv; tenv = tenv } as env) (e, t) =
         end
     | LetRec({ name = (x, ft); args = yts; body = e1 }, e2) -> 
         let e1' = g { env with Env.venv = M.add_list yts (M.add x ft venv) } e1 in
-        let e2' = g (Env.add_var_type env x ft) e2 in
+        let e2' = g (Env.add_var env x ft) e2 in
         LetRec({ name = (x, ft); args = yts; body = e1' }, e2'), (snd e2')
     | App(e, es) -> 
         let e' = g env e in
@@ -312,19 +310,33 @@ let rec g ({ Env.venv = venv; tenv = tenv } as env) (e, t) =
 let f' env e = g env e 
     
 let f defs = 
-  let defs' = 
-    fold (fun (env, defs) def -> 
-      match def with
-      | TypeDef(x, t) -> TypeDef(x, t) :: defs
-      | VarDef((x, t), e) -> 
-          let e' = f' env e in
-          let defs' = !wrapper_defs @ defs in
-          wrapper_defs := [];
-          VarDef((x, t), e') :: defs'
-      | RecDef({ name = (x, t); args = yts; body = e }) -> 
-          let e' = f' env e in
-          let defs' = !wrapper_defs @ defs in
-          wrapper_defs := [];
-          RecDef({ name = (x, t); args = yts; body = e' }) :: defs')
-      defs in
-  defs'
+
+  let setup_predefined table generator ty = 
+    let (x, ft), _ = generator (Type.Var(Type.newtyvar ())) ty in
+    Env.extenv := { !Env.extenv with Env.venv = M.add x ft !Env.extenv.Env.venv };
+    Hashtbl.add table ty (Var(x), ft) in
+  
+  let setup_predefined_wrapper = setup_predefined wrappers gen_wrapper in
+  let setup_predefined_unwrapper = setup_predefined unwrappers gen_unwrapper in
+
+  List.iter 
+    (fun ty -> 
+      setup_predefined_wrapper ty; 
+      setup_predefined_unwrapper ty)
+    [Type.App(Type.Int, []); Type.App(Type.Bool, [])];
+
+  fold (fun (env, defs) def -> 
+    match def with
+    | TypeDef(x, t) -> 
+        TypeDef(x, t) :: defs
+    | VarDef((x, t), e) -> 
+        let e' = f' env e in
+        let defs' = !wrapper_defs @ defs in
+        wrapper_defs := [];
+        VarDef((x, t), e') :: defs'
+    | RecDef({ name = (x, t); args = yts; body = e }) -> 
+        let e' = f' env e in
+        let defs' = !wrapper_defs @ defs in
+        wrapper_defs := [];
+        RecDef({ name = (x, t); args = yts; body = e' }) :: defs')
+    defs

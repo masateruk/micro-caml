@@ -259,12 +259,12 @@ let f defs =
               Env.tenv = M.add_list (Type.types t) tenv }, 
           TypeDef(x, t)
         | KNormal.VarDef((x, t), e) -> 
-            Env.add_var_type env x t, (VarDef((x, t), f' env e))
+            Env.add_var env x t, (VarDef((x, t), f' env e))
         | KNormal.RecDef({ KNormal.name = (x, t); args = yts; body = e1 }) ->
-            let env' = Env.add_var_type env x t in
+            let env' = Env.add_var env x t in
             env', (FunDef({ name = (Id.L(x), t); args = yts; formal_fv = []; body = f' env' e1 })) in
       toplevel := def' :: !toplevel;
       (env', def' :: defs))
-    Env.empty defs in
+    !Env.empty defs in
   Prog(List.rev !toplevel)
     

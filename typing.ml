@@ -80,7 +80,7 @@ let rec unify ({ Env.tycons = tycons } as env) t1 t2 = (* 型が合うように�
   unify' t1 t2
     
 let test_unify =
-  assert ((unify Env.empty (Type.App(Type.Int, [])) (Type.App(Type.Int, []))) = ())
+  assert ((unify !Env.empty (Type.App(Type.Int, [])) (Type.App(Type.Int, []))) = ())
     
 (*        
 let rec expand tenv = 
@@ -220,7 +220,7 @@ let rec deref_pattern env p =
   let () = D.printf "Typing.deref_pattern %s\n" (string_of_pattern p) in
   match p with
   | PtBool _ | PtInt _ as p -> p, env
-  | PtVar(x, t) -> PtVar(x, deref_type env t), Env.add_var_type env x t
+  | PtVar(x, t) -> PtVar(x, deref_type env t), Env.add_var env x t
   | PtTuple(ps) -> 
       let ps', env' = List.fold_right (fun p (ps, env) -> let p', env' = deref_pattern env p in p' :: ps, env') ps ([], env) in
       PtTuple(ps'), env'
@@ -257,12 +257,12 @@ and deref_expr ({ Env.venv = venv } as env) =
   | If(e1, e2, e3) -> If(deref_typed_expr env e1, deref_typed_expr env e2, deref_typed_expr env e3)
   | Match(e, pes) ->  Match(deref_typed_expr env e, (List.map (fun (p, e) -> let p', env' = deref_pattern env p in p', deref_typed_expr env' e) pes))
   | LetVar((x, t), e1, e2) -> 
-      LetVar(deref_id_type env (x, t), deref_typed_expr env e1, deref_typed_expr (Env.add_var_type env x t) e2)
+      LetVar(deref_id_type env (x, t), deref_typed_expr env e1, deref_typed_expr (Env.add_var env x t) e2)
   | LetRec({ name = (x, t); args = yts; body = e1 }, e2) ->
       LetRec({ name = deref_id_type env (x, t);
                args = List.map (deref_id_type env) yts;
                body = deref_typed_expr { env with Env.venv = M.add_list yts (M.add x t venv) } e1 },
-             deref_typed_expr (Env.add_var_type env x t) e2)
+             deref_typed_expr (Env.add_var env x t) e2)
   | App(e, es) -> App(deref_typed_expr env e, List.map (deref_typed_expr env) es)
   | Constr(x, es) -> Constr(x, List.map (deref_typed_expr env) es)
   | WrapBody(x, t) -> WrapBody(x, deref_type env t)
@@ -273,7 +273,7 @@ let rec pattern ({ Env.venv = venv; tenv = tenv } as env) p =
   match p with
   | PtBool(b) -> env, Type.App(Type.Bool, [])
   | PtInt(n) -> env, Type.App(Type.Int, [])
-  | PtVar(x, t') -> Env.add_var_type env x t', t'
+  | PtVar(x, t') -> Env.add_var env x t', t'
   | PtTuple(ps) -> 
       let env', ts' = List.fold_left (fun (env, ts) p -> let env', t' = pattern env p in env', t' :: ts) (env, []) (List.rev ps) in
       env', Type.App(Type.Tuple, ts')
@@ -435,14 +435,14 @@ let rec g ({ Env.venv = venv; tenv = tenv } as env) ((e:expr), t) = (* 型推論
           let e1', t1' = g env et1 in
           let t1' = generalize env t1' in (* 副作用は未サポートなので、Tiger本のp.335にある代入の判定はなし *)
           unify env t t1';
-          let e2', t2' = g (Env.add_var_type env x t1') et2 in
+          let e2', t2' = g (Env.add_var env x t1') et2 in
           LetVar((x, t1'), (e1', t1'), (e2', t2')), t2'
       | Var(x) when M.mem x venv -> e, instantiate env (M.find x venv) (* 変数の型推論 (caml2html: typing_var) *)
-      | Var(x) when M.mem x !Env.extenv -> e, instantiate env (M.find x !Env.extenv)
+      | Var(x) when M.mem x !Env.extenv.Env.venv -> e, instantiate env (M.find x !Env.extenv.Env.venv)
       | Var(x) -> (* 外部変数の型推論 (caml2html: typing_extvar) *)
           Format.eprintf "free variable %s assumed as external@." x;
           let t = Type.Meta(Type.newmetavar ()) in
-          Env.extenv := M.add x t !Env.extenv;
+          Env.extenv := { !Env.extenv with Env.venv = M.add x t !Env.extenv.Env.venv };
           e, instantiate env t
       | Constr(x, []) -> 
           e, instantiate env (M.find x venv)
@@ -462,7 +462,7 @@ let rec g ({ Env.venv = venv; tenv = tenv } as env) ((e:expr), t) = (* 型推論
           unify env t t';
           unify env t2 t1';
           let t'' = generalize env t' in
-          let e2', t2' = g (Env.add_var_type env x t'') et2 in
+          let e2', t2' = g (Env.add_var env x t'') et2 in
           LetRec({ name = (x, t''); args = yts; body = (e1', t1') }, (e2', t2')), t2'
       | App(e, ets) -> (* 関数適用の型推論 (caml2html: typing_app) *)
           let e', t' = g env e in
@@ -482,11 +482,18 @@ let f' env (et, t) =
   try 
     let (e':expr), (t':Type.t) = g env (et:t) in
     unify env t t';
-    Env.extenv := M.map (deref_type env) !Env.extenv;
+    Env.extenv := { !Env.extenv with Env.venv = M.map (deref_type env) !Env.extenv.Env.venv };
     deref_typed_expr env (e', t')
   with Unify _ -> failwith "type error."
     
-let f = 
+let f defs = 
+  
+  let { Env.venv = venv; tenv = tenv; tycons = tycons } as env = !Env.empty in
+  let empty'= { Env.venv = M.map (deref_type env) venv;
+                Env.tenv = M.map (deref_type env) tenv; 
+                Env.tycons = M.map (deref_tycon env) tycons; } in
+  Env.empty := empty';
+  
   fold (fun ({ Env.venv = venv; tenv = tenv; tycons = tycons } as env, defs) def ->
     let () = D.printf "Typing.f %s\n" (string_of_def def) in
     let def' = 
@@ -499,6 +506,6 @@ let f =
       | RecDef({ name = (x, t); args = yts; body = e }) -> 
           let e' = f' { env with Env.venv = M.add_list yts (M.add x t env.Env.venv) } (e, t) in
           RecDef({ name = (x, deref_type env t); args = List.map (fun (y, t) -> (y, deref_type env t)) yts; body = e' }) in
-    def' :: defs)
+    def' :: defs) defs
 
     

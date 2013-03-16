@@ -43,11 +43,12 @@ type fundef = {
   body : t;
   ret : CType.t;
 }
-type def = 
-  | VarDef of (Id.t * CType.t) * t
-  | FunDef of fundef * bool ref 
-  | TypeDef of (Id.t * CType.t) * bool ref
-  | EnumDef of Id.t list * bool ref
+type annot = PreDef | User
+type def =
+  | VarDef of (Id.t * CType.t) * t * annot
+  | FunDef of fundef * annot * bool ref (* used flag *)
+  | TypeDef of (Id.t * CType.t) * annot * bool ref
+  | EnumDef of Id.t list * annot * bool ref
 type prog = Prog of def list
   
 val string_of_expr : expr -> Id.t

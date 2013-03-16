@@ -1,9 +1,5 @@
 let lexbuf outchan l = (* バッファをコンパイルしてチャンネルへ出力する (caml2html: main_lexbuf) *)
   Id.counter := 0;
-  Env.extenv := M.add_list [
-    ("print_int", (Type.Poly([], (Type.App(Type.Arrow, [Type.App(Type.Int, []); Type.App(Type.Unit, [])])))));
-    ("assert", (Type.Poly([], (Type.App(Type.Arrow, [Type.App(Type.Bool, []); Type.App(Type.Unit, [])])))))
-  ] M.empty;
   output_string outchan
     (CFormat.f
 	(Optimize.f

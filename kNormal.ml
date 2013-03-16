@@ -116,7 +116,7 @@ let rec pattern env p =
   match p with
   | Syntax.PtBool(b) -> env, (PtBool(b))
   | Syntax.PtInt(n) -> env, (PtInt(n))
-  | Syntax.PtVar(x, t) -> Env.add_var_type env x t, (PtVar(x, t))
+  | Syntax.PtVar(x, t) -> Env.add_var env x t, (PtVar(x, t))
   | Syntax.PtTuple(ps) -> 
       let env, ps' = List.fold_left (fun (env, ps) p -> let env', p' = pattern env p in env', p' :: ps) (env, []) (List.rev ps) in
       env, PtTuple(ps')
@@ -186,7 +186,7 @@ let rec g ({ Env.venv = venv; tenv = tenv } as env) (e, t) = (* K正規化ルー
         Let((x, t), e', (Match(x, pes'), t))
     | Syntax.LetVar((x, t), e1, e2) ->
         let e1' = g env e1 in
-        let e2' = g (Env.add_var_type env x t) e2 in
+        let e2' = g (Env.add_var env x t) e2 in
         Let((x, t), e1', e2')
     | Syntax.LetRec({ Syntax.name = (x, t); Syntax.args = yts; Syntax.body = e1 }, e2) ->
         let venv' = M.add x t venv in
@@ -225,12 +225,12 @@ let map f defs =
             Env.tenv = M.add_list (Type.types t) tenv } in
           env', f env' def
       | VarDef((x, t), e) ->  
-          Env.add_var_type env x t, f env def
+          Env.add_var env x t, f env def
       | RecDef({ name = (x, t); args = yts; body = e1 }) -> 
-          let env' = Env.add_var_type env x t in
+          let env' = Env.add_var env x t in
           env', f env' def in
     env', (def' :: defs) in
-  fold f' Env.empty defs
+  fold f' !Env.empty defs
 
 let f' env e = g env e
 

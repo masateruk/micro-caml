@@ -89,7 +89,7 @@ let rec string_of_def = function
   | TypeDef(x, t) -> "TypeDef(" ^ x ^ ", " ^ (Type.string_of_tycon t) ^ ")"
   | VarDef((x, t), e) -> "VarDef((" ^ x ^ ", " ^ (Type.string_of_t t) ^ "), " ^ (string_of_typed_expr e)
   | RecDef(fundef) -> "RecDef(" ^ (string_of_fundef fundef) ^ ")"
-      
+
 let fold f defs =
   let _, defs' = 
     List.fold_left
@@ -102,8 +102,8 @@ let fold f defs =
             }, 
           f (env, defs) def
         | VarDef((x, t), e) -> 
-            Env.add_var_type env x t, f (env, defs) def
+            Env.add_var env x t, f (env, defs) def
         | RecDef({ name = (x, t); args = yts; body = e }) -> 
-            Env.add_var_type env x t, f (env, defs) def)
-      (Env.empty, []) defs in
+            Env.add_var env x t, f (env, defs) def)
+      (!Env.empty, []) defs in
   List.rev defs'

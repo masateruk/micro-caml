@@ -19,7 +19,7 @@ INC_DIRS := \
 	/usr/local/include \
 	../lib/include
 
-CFLAGS := -g -Wall -Werror \
+CFLAGS := -g -Wall \
 	-DDEBUG \
 	-DUSE_GC=$(USE_GC) \
 	$(addprefix -I, $(INC_DIRS))

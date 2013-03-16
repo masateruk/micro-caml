@@ -123,7 +123,7 @@ simple_expr: /* 括弧をつけなくても関数の引数になれる式 (caml2
 | simple_expr DOT IDENT
     { add_type (Field($1, $3)) }
 | LSQUARE_BRANKET list RSQUARE_BRANKET
-    { List.fold_right (fun x xs -> add_type (Cons(x, xs))) $2 (add_type (Nil(Type.Meta(Type.newmetavar ())))) }
+    { List.fold_right (fun x xs -> add_type (Constr("Cons", [x; xs]))) $2 (add_type (Constr("Nil", []))) }
 ;
 expr: /* 一般の式 (caml2html: parser_expr) */
 | simple_expr
@@ -143,7 +143,7 @@ expr: /* 一般の式 (caml2html: parser_expr) */
 | expr SLASH expr
     { add_type (Div($1, $3)) }
 | expr CONS expr
-    { add_type (Cons($1, $3)) }
+    { add_type (Constr("Cons", [$1; $3])) }
 | expr LAND expr
     { add_type (And($1, $3)) }
 | expr LOR expr
@@ -272,6 +272,10 @@ pattern:
     { PtConstr($1, []) }
 | UIDENT pattern
     { PtConstr($1, constr_pattern_args $2) }
+| pattern CONS pattern
+    { PtConstr("Cons", [$1; $3]) }
+| LSQUARE_BRANKET list_pattern RSQUARE_BRANKET
+    { List.fold_right (fun x xs -> (PtConstr("Cons", [x; xs]))) $2 (PtConstr("Nil", [])) }
 ;
 
 tuple_pattern:
@@ -376,4 +380,17 @@ tail:
     { [] }
 | SEMICOLON expr tail
     { $2 :: $3 }
+;
+list_pattern: 
+| /* empty */
+    { [] }
+| pattern tail_pattern
+    { $1 :: $2 }
+;
+tail_pattern: 
+| 
+    { [] }
+| SEMICOLON pattern tail_pattern
+    { $2 :: $3 }
+    
     

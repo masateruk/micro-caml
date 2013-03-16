@@ -62,9 +62,9 @@ and reduce_release_of_list e = function
 let mark_id defs x =
   List.iter 
     (function 
-    | FunDef({ name = Id.L(x'); _ }, b) when x' = x -> b := true 
-    | TypeDef((_, CType.Enum(_, xs)), b) when List.mem x xs -> b := true 
-    | EnumDef(xs, b) when List.mem x xs -> b := true
+    | FunDef({ name = Id.L(x'); _ }, _, b) when x' = x -> b := true 
+    | TypeDef((_, CType.Enum(_, xs)), _, b) when List.mem x xs -> b := true 
+    | EnumDef(xs, _, b) when List.mem x xs -> b := true
     | _ -> ()) 
     defs
 
@@ -72,10 +72,10 @@ let rec mark_ty defs t =
   List.iter 
     (fun def -> 
       match t, def with 
-      | CType.NameTy(x, { contents = Some(t) }), TypeDef((x', t'), b) when x' = x && CType.equal t t' -> 
+      | CType.NameTy(x, { contents = Some(t) }), TypeDef((x', t'), _, b) when x' = x && CType.identical t t' -> 
           begin
             match t with
-            | CType.Void | CType.Int | CType.Bool | CType.Enum _ | CType.Box | CType.Pseudo | CType.NameTy(_, { contents = None }) -> ()
+            | CType.Void | CType.Int | CType.Bool | CType.Enum _ | CType.Box | CType.Nothing | CType.NameTy(_, { contents = None }) -> ()
             | CType.Fun(xs, y) -> List.iter (mark_ty defs) (y :: xs)
             | CType.Struct(_, _, xts) 
             | CType.Union(xts) -> List.iter (mark_ty defs) (List.map snd xts)
@@ -125,8 +125,8 @@ let rec mark_s defs = function
 (* 関数定義で使用している定義にマークをつける。不要な定義を出力しないため。ただし他から呼ばれない再帰関数は使用ありとマークされるなど不完全。*)      
 let rec mark defs = 
   function
-  | FunDef({ name = Id.L(x); args = yts; body = s; ret = t }, _) -> mark_s defs s; List.iter (fun (_, t) -> mark_ty defs t) yts; mark_ty defs t
-  | EnumDef(xs, b) -> b := true (* EnumDef は int で参照されるため強制的に使用していることにする *)
+  | FunDef({ name = Id.L(x); args = yts; body = s; ret = t }, _, _) -> mark_s defs s; List.iter (fun (_, t) -> mark_ty defs t) yts; mark_ty defs t
+  | EnumDef(xs, _, b) -> b := true (* EnumDef は int で参照されるため強制的に使用していることにする *)
   | def -> ()
 
 (* trueとの論理積, falseとの論理和を削除 *)
@@ -197,8 +197,8 @@ let rec simplify_s =
 
 let g = 
   function
-  | FunDef({ name = Id.L(x); args = yts; body = s; ret = t }, b) ->
-      FunDef({ name = Id.L(x);  args = yts; body = simplify_s (reduce_addref s); ret = t }, b) 
+  | FunDef({ name = Id.L(x); args = yts; body = s; ret = t }, a, b) ->
+      FunDef({ name = Id.L(x);  args = yts; body = simplify_s (reduce_addref s); ret = t }, a, b) 
   | def -> def
 	      
 let f (Prog(defs)) = 

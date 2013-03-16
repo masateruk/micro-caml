@@ -34,7 +34,7 @@ let rec string_of_type ?(depth = 0) ?(tags = []) =
            (List.fold_left
               (fun s (x, t) -> 
                 match t with
-                | CType.Pseudo -> s
+                | CType.Nothing -> s
                 | t -> (string_of_id ~depth:(depth + 1) ~tags:(tag::tags) x t) :: s) [] (List.rev xts))) ^ ";\n" ^ 
         (indent depth) ^ "}"
   | CType.Union(xts) ->
@@ -43,20 +43,20 @@ let rec string_of_type ?(depth = 0) ?(tags = []) =
            (List.fold_left
               (fun s (x, t) -> 
                 match t with
-                | CType.Pseudo -> s
+                | CType.Nothing -> s
                 | t -> (string_of_id ~depth:(depth + 1) ~tags:tags x t) :: s) [] (List.rev xts))) ^ ";\n" ^ 
         (indent depth) ^ "}"
   | CType.NameTy(x', _) when List.mem x' tags -> (indent depth) ^ "struct " ^ x'
   | CType.NameTy(x', _) -> (indent depth) ^ x'
   | CType.Box -> (indent depth) ^ "sp_t"
   | CType.Pointer t -> (indent depth) ^ (string_of_type ~tags:tags t) ^ "*" 
-  | CType.Pseudo -> (indent depth)
+  | CType.Nothing -> (indent depth)
       
 and string_of_id ?(depth = 0) ?(tags = []) x = 
   function
   | CType.Fun(args, ret) -> 
       (indent depth) ^ (string_of_type ret) ^ " (*" ^ x ^ ")(" ^ (String.concat ", " (List.map (string_of_type ~tags:tags) args)) ^ ")" 
-  | CType.Pseudo -> ""
+  | CType.Nothing -> ""
   | t -> 
       (string_of_type ~depth:depth ~tags:tags t) ^ " " ^ x
         
@@ -126,18 +126,18 @@ let rec string_of_prog (Prog(defs)) =
   let string_of_def = 
     let string_of_statement = string_of_statement 0 0 in
     function
-    | FunDef({ name = Id.L(x); args = yts; body = s; ret = t }, used) when !used ->
+    | FunDef({ name = Id.L(x); args = yts; body = s; ret = t }, User, used) when !used ->
         let t' = string_of_type t in
         let name' = x in
         let args' = String.concat ", " (List.map (fun (y, t) -> (string_of_id y t)) yts) in
         let body' = string_of_statement s in
           t' ^ " " ^ name' ^ "(" ^ args' ^ ")\n" ^ body' ^ "\n\n"
-    | TypeDef((x, t), used) when !used ->
+    | TypeDef((x, t), User, used) when !used ->
         "typedef " ^ (string_of_id x t) ^ ";\n\n" 
-    | VarDef((x, t), e) -> 
+    | VarDef((x, t), e, User) -> 
         (match e with Exp _ -> () | _ -> assert false);
         (string_of_id x t) ^ " = " ^ (string_of_statement e) ^ ";\n\n" 
-    | EnumDef(xs, used) when !used ->
+    | EnumDef(xs, User, used) when !used ->
         "enum {\n" ^ 
           (String.concat ",\n" (List.map (fun x -> (indent 1) ^ x) xs)) ^ "\n" ^ 
           "};\n\n" 
