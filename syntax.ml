@@ -2,7 +2,6 @@ type t = (* uCamlの構文を表現するデータ型 (caml2html: syntax_t) *)
     expr * Type.t 
 and expr = 
   | Unit
-  | Nil of Type.t
   | Bool of bool
   | Int of int
   | Record of (Id.t * t) list
@@ -16,7 +15,6 @@ and expr =
   | Sub of t * t
   | Mul of t * t
   | Div of t * t
-  | Cons of t * t
   | Eq of t * t
   | LE of t * t
   | If of t * t * t
@@ -55,7 +53,6 @@ let rec string_of_typed_expr (e, t) = (string_of_expr e) ^ " : " ^ (Type.string_
 and string_of_expr = 
   function
   | Unit -> "Unit"
-  | Nil(t) -> "Nil(" ^ (Type.string_of_t t) ^ ")"
   | Bool(b) -> "Bool(" ^ (string_of_bool b) ^ ")"
   | Int(n) -> "Int(" ^ (string_of_int n) ^ ")"
   | Record(xs) -> "Record(" ^ (String.concat "; " (List.map (fun (x, e) -> x ^ " = " ^ (string_of_typed_expr e)) xs)) ^ ")"
@@ -69,7 +66,6 @@ and string_of_expr =
   | Sub(e1, e2) -> "Sub(" ^ (string_of_typed_expr e1) ^ ", " ^ (string_of_typed_expr e2) ^ ")"
   | Mul(e1, e2) -> "Mul(" ^ (string_of_typed_expr e1) ^ ", " ^ (string_of_typed_expr e2) ^ ")"
   | Div(e1, e2) -> "Div(" ^ (string_of_typed_expr e1) ^ ", " ^ (string_of_typed_expr e2) ^ ")"
-  | Cons(e1, e2) -> "Cons(" ^ (string_of_typed_expr e1) ^ ", " ^ (string_of_typed_expr e2) ^ ")"
   | Eq(e1, e2) -> "Eq(" ^ (string_of_typed_expr e1) ^ ", " ^ (string_of_typed_expr e2) ^ ")"
   | LE(e1, e2) -> "LE(" ^ (string_of_typed_expr e1) ^ ", " ^ (string_of_typed_expr e2) ^ ")"
   | If(e1, e2, e3) -> "If(" ^ (string_of_typed_expr e1) ^ " then " ^ (string_of_typed_expr e2) ^ " else " ^ (string_of_typed_expr e3) ^ ")"
@@ -98,12 +94,12 @@ let fold f defs =
         | TypeDef(x, t) -> 
             { Env.venv = M.add_list (Type.vars t) venv;
               Env.tenv = M.add_list (Type.types t) tenv;
-              Env.tycons = M.add x t tycons;
-            }, 
+              Env.tycons = M.add x t tycons }, 
           f (env, defs) def
         | VarDef((x, t), e) -> 
             Env.add_var env x t, f (env, defs) def
-        | RecDef({ name = (x, t); args = yts; body = e }) -> 
-            Env.add_var env x t, f (env, defs) def)
+        | RecDef({ name = (x, ty_f); args = yts; body = e }) -> 
+            let env' = { env with Env.venv = M.add_list yts (M.add x ty_f venv) } in
+            { env with Env.venv = M.add x ty_f venv }, f (env', defs) def)
       (!Env.empty, []) defs in
   List.rev defs'

@@ -2,7 +2,7 @@ open C
 
 let prec = 
   function
-  | Nop | Nil _ | Bool _ | Int _ | Struct _ | Var _ 
+  | Nop | Bool _ | Int _ | Struct _ | Var _ 
   | CallDir _ | MakeClosure _ | FieldDot _  | FieldArrow _  | Sizeof _ | Ref _ | Deref _ | Cast _ -> 9
   | Not _ | Neg _ -> 8
   | Mul _ | Div _ -> 7
@@ -65,7 +65,6 @@ let rec string_of_exp outer e =
   let s = 
     match e with
     | Nop -> ""
-    | Nil _ -> "nil"
     | Bool(b) -> string_of_bool b
     | Int(i) -> string_of_int i
     | Struct(x, xes) -> "(" ^ x ^ "){" ^ (String.concat ", " (List.map (fun (x, e) -> "." ^ x ^ " = " ^ (string_of_exp inner e)) xes)) ^ "}"
@@ -126,18 +125,18 @@ let rec string_of_prog (Prog(defs)) =
   let string_of_def = 
     let string_of_statement = string_of_statement 0 0 in
     function
-    | FunDef({ name = Id.L(x); args = yts; body = s; ret = t }, User, used) when !used ->
+    | FunDef({ name = Id.L(x); args = yts; body = s; ret = t }, used) when !used ->
         let t' = string_of_type t in
         let name' = x in
         let args' = String.concat ", " (List.map (fun (y, t) -> (string_of_id y t)) yts) in
         let body' = string_of_statement s in
           t' ^ " " ^ name' ^ "(" ^ args' ^ ")\n" ^ body' ^ "\n\n"
-    | TypeDef((x, t), User, used) when !used ->
+    | TypeDef((x, t), used) when !used ->
         "typedef " ^ (string_of_id x t) ^ ";\n\n" 
-    | VarDef((x, t), e, User) -> 
+    | VarDef((x, t), e) -> 
         (match e with Exp _ -> () | _ -> assert false);
         (string_of_id x t) ^ " = " ^ (string_of_statement e) ^ ";\n\n" 
-    | EnumDef(xs, User, used) when !used ->
+    | EnumDef(xs, used) when !used ->
         "enum {\n" ^ 
           (String.concat ",\n" (List.map (fun x -> (indent 1) ^ x) xs)) ^ "\n" ^ 
           "};\n\n" 

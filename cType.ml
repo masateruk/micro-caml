@@ -38,7 +38,7 @@ let rec string_of_t reached t =
 and string_of_kind = 
   function
   | Normal -> "Normal"
-  | Ref -> "Rec"
+  | Ref -> "Ref"
   | Closure -> "Closure"
 
 let string_of_t = string_of_t []

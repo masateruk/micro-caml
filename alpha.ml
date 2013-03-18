@@ -65,9 +65,7 @@ let rec g ids (e, t) = (* α変換ルーチン本体 (caml2html: alpha_g) *)
   let e' = 
     match e with
     | Unit -> Unit
-    | Nil(t) -> Nil(t)
     | Exp(e) -> Exp(h ids e)
-    | Cons(x, y) -> Cons(find x ids, find y ids)
     | If(e, e1, e2) -> If(h ids e, g ids e1, g ids e2)
     | Match(x, pes) -> Match(find x ids, List.map (fun (p, e) -> let ids', p' = pattern ids p in p', g ids' e) pes)
     | Let((x, t), e1, e2) -> (* letのα変換 (caml2html: alpha_let) *)
@@ -93,5 +91,8 @@ let f =
     | VarDef((x, t), e) -> 
         (add x (genid x ids) ids), VarDef((x, t), g ids e) :: defs
     | RecDef({ name = (x, t); args = yts; body = e1 }) -> 
-        (add x (genid x ids) ids), RecDef({ name = (x, t); args = yts; body = g ids e1 }) :: defs in
+        let ids = add x (genid x ids) ids in
+        let ys = List.map fst yts in
+        let ids' = add_list ys ids in
+        ids, RecDef({ name = (x, t); args = List.map (fun (y, t) -> (find y ids', t)) yts; body = g ids' e1 }) :: defs in
   fold f' M.empty

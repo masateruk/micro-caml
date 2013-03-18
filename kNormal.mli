@@ -2,9 +2,7 @@ type t = (* K正規化後の式 (caml2html: knormal_t) *)
     term * Type.t
 and term =
   | Unit
-  | Nil of Type.t
   | Exp of e
-  | Cons of Id.t * Id.t
   | If of e * t * t 
   | Match of Id.t * (pattern * t) list
   | Let of (Id.t * Type.t) * t * t

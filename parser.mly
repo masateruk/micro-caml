@@ -72,12 +72,12 @@ let constr_pattern_args = function PtTuple(xs) -> xs | x -> [x]
 %left prec_app
 
 /* 開始記号の定義 */
-%type <Syntax.def list> impl
-%start impl
+%type <Syntax.def list> f
+%start f
 
 %%
 
-impl: 
+f: 
 | definitions { $1 }
 ;
 definitions:

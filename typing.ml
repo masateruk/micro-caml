@@ -8,7 +8,7 @@ exception Error of expr * Type.t * Type.t
 let rec subst ({ Env.tycons = tycons } as env) tyvars reached t =
   let () = D.printf "Typing.subst %s\n" (Type.string_of_t t) in
   let rec subst' reached ty = 
-    let () = D.printf "    Typing.subst' %s\n" (Type.string_of_t ty) in
+(*    let () = D.printf "    Typing.subst' %s\n" (Type.string_of_t ty) in *)
     match ty with
     | Type.Var(x) when M.mem x tyvars -> M.find x tyvars
     | Type.Var(x) -> Type.Var(x)
@@ -42,10 +42,10 @@ let rec occur x = (* occur check (caml2html: typing_occur) *)
   | Type.Meta{ contents = Some(t) } -> occur x t
   | Type.Meta(y) -> x == y
       
-let rec unify ({ Env.tycons = tycons } as env) t1 t2 = (* 型が合うように、メタ型変数への代入をする. 成功したら () を返す. (caml2html: typing_unify) *)
-  let _ = D.printf "Typing.unify %s %s\n" (Type.string_of_t t1) (Type.string_of_t t2) in
+let rec unify ({ Env.tycons = tycons } as env) ty1 ty2 = (* 型が合うように、メタ型変数への代入をする. 成功したら () を返す. (caml2html: typing_unify) *)
+  let _ = D.printf "Typing.unify %s %s\n" (Type.string_of_t ty1) (Type.string_of_t ty2) in
   let rec unify' t1 t2 =  
-    let _ = D.printf "    Typing.unify' %s %s\n" (Type.string_of_t t1) (Type.string_of_t t2) in
+(*    let _ = D.printf "    Typing.unify' %s %s\n" (Type.string_of_t t1) (Type.string_of_t t2) in *)
     match t1, t2 with
     | Type.App(Type.Unit, xs), Type.App(Type.Unit, ys) 
     | Type.App(Type.Bool, xs), Type.App(Type.Bool, ys) 
@@ -77,7 +77,7 @@ let rec unify ({ Env.tycons = tycons } as env) t1 t2 = (* 型が合うように�
     | _, _ -> 
         D.printf "unify failed.\n  t1 = %s\n  t2 = %s\n" (Type.string_of_t t1) (Type.string_of_t t2);
         raise (Unify(t1, t2)) in
-  unify' t1 t2
+  unify' ty1 ty2
     
 let test_unify =
   assert ((unify !Env.empty (Type.App(Type.Int, [])) (Type.App(Type.Int, []))) = ())
@@ -90,8 +90,8 @@ let rec expand tenv =
   | Type.NameTy(x, _) -> expand tenv (M.find x tenv)
   | t -> t
 *)      
-let rec generalize { Env.venv = venv; tycons = tycons } t = 
-  let _ = D.printf "Typing.generalize %s\n" (Type.string_of_t t) in
+let rec generalize { Env.venv = venv; tycons = tycons } ty = 
+  let _ = D.printf "Typing.generalize %s\n" (Type.string_of_t ty) in
   let rec exists v = 
     function
     | Type.App(Type.NameTycon(_, { contents = Some(tycon) }), ts) -> exists v (Type.App(tycon, ts))
@@ -115,7 +115,7 @@ let rec generalize { Env.venv = venv; tycons = tycons } t =
     | Type.Meta{ contents = Some(t') } -> metavars vs t'
     | Type.Meta(x) when M.exists (fun _ t' -> exists x t') venv -> vs
     | Type.Meta(x) -> if (List.memq x vs) then vs else x :: vs in
-  let ms = metavars [] t in
+  let ms = metavars [] ty in
   let tyvars = List.map 
     (fun m -> 
       match !m with 
@@ -124,14 +124,14 @@ let rec generalize { Env.venv = venv; tycons = tycons } t =
                 var 
       | _ -> assert false) 
     ms in
-  let t = Type.Poly(tyvars, t) in
+  let t = Type.Poly(tyvars, ty) in
   let _ = D.printf "  => %s\n" (Type.string_of_t t) in
   t
     
-let rec instantiate env t =
-  let _ = D.printf "Typing.instantiate %s\n" (Type.string_of_t t) in
+let rec instantiate env ty =
+  let _ = D.printf "Typing.instantiate %s\n" (Type.string_of_t ty) in
   let t = 
-    match t with
+    match ty with
     | Type.Poly(xs, t) -> 
         subst env (M.add_list (List.map (fun x -> (x, Type.Meta(Type.newmetavar ()))) xs) M.empty) t
     | t -> t in
@@ -140,7 +140,6 @@ let rec instantiate env t =
       
 (* for pretty printing (and type normalization) *)
 let rec deref_tycon ({ Env.tycons = tycons } as env) reached tycon =
-  let () = D.printf "    Typing.deref_tycon %s\n" (Type.string_of_tycon tycon) in
   match tycon with
   | Type.Int | Type.Bool | Type.Unit | Type.Arrow | Type.Tuple as tycon -> tycon, reached
   | Type.Record(x, _) as tycon -> tycon, M.add x tycon reached
@@ -184,7 +183,6 @@ let rec deref_tycon ({ Env.tycons = tycons } as env) reached tycon =
         Type.TyFun(xs, t'), reached'
   
 and deref_type env reached t = (* 型変数を中身でおきかえる関数 (caml2html: typing_deref) *)
-  let () = D.printf "    Typing.deref_type %s\n" (Type.string_of_t t) in
   match t with
   | Type.Var(x) -> Type.Var(x), reached
   | Type.Field(x, t) -> 
@@ -205,19 +203,14 @@ and deref_type env reached t = (* 型変数を中身でおきかえる関数 (ca
       t', reached'
 
 let deref_tycon env tycon = 
-  let () = D.printf "Typing.deref_tycon %s\n" (Type.string_of_tycon tycon) in
   let tycon', _ = deref_tycon env M.empty tycon in
-  let () = D.printf " => %s\n" (Type.string_of_tycon tycon') in
   tycon'
 
-let deref_type env t = 
-  let () = D.printf "Typing.deref_type %s\n" (Type.string_of_t t) in
-  let t', _ = deref_type env M.empty t in
-  let () = D.printf " => %s\n" (Type.string_of_t t') in
+let deref_type env ty = 
+  let t', _ = deref_type env M.empty ty in
   t'
 
 let rec deref_pattern env p =
-  let () = D.printf "Typing.deref_pattern %s\n" (string_of_pattern p) in
   match p with
   | PtBool _ | PtInt _ as p -> p, env
   | PtVar(x, t) -> PtVar(x, deref_type env t), Env.add_var env x t
@@ -231,15 +224,14 @@ let rec deref_pattern env p =
       let ps', env' = List.fold_right (fun p (ps, env) -> let p', env' = deref_pattern env p in p' :: ps, env') ps ([], env) in
       PtConstr(x, ps'), env'
 
-let rec deref_id_type env (x, t) = (x, deref_type env t)
+let rec deref_id_type env (x, ty) = (x, deref_type env ty)
 
 let rec deref_typed_expr ({ Env.venv = venv } as env) (e, t) = 
   (deref_expr env e, deref_type env t)
 
-and deref_expr ({ Env.venv = venv } as env) =
-  function
+and deref_expr ({ Env.venv = venv } as env) e = 
+  match e with
   | Int _ | Bool _ | Unit | Var _ as e -> e
-  | Nil(t) -> Nil(deref_type env t)
   | Record(xes) -> Record(List.map (fun (x, e) -> x, deref_typed_expr env e) xes)
   | Field(e, x) -> Field(deref_typed_expr env e, x)
   | Tuple(es) -> Tuple(List.map (deref_typed_expr env) es)
@@ -253,7 +245,6 @@ and deref_expr ({ Env.venv = venv } as env) =
   | LE(e1, e2) -> LE(deref_typed_expr env e1, deref_typed_expr env e2)
   | Mul(e1, e2) -> Mul(deref_typed_expr env e1, deref_typed_expr env e2)
   | Div(e1, e2) -> Div(deref_typed_expr env e1, deref_typed_expr env e2)
-  | Cons(e1, e2) -> Cons(deref_typed_expr env e1, deref_typed_expr env e2)
   | If(e1, e2, e3) -> If(deref_typed_expr env e1, deref_typed_expr env e2, deref_typed_expr env e3)
   | Match(e, pes) ->  Match(deref_typed_expr env e, (List.map (fun (p, e) -> let p', env' = deref_pattern env p in p', deref_typed_expr env' e) pes))
   | LetVar((x, t), e1, e2) -> 
@@ -267,6 +258,17 @@ and deref_expr ({ Env.venv = venv } as env) =
   | Constr(x, es) -> Constr(x, List.map (deref_typed_expr env) es)
   | WrapBody(x, t) -> WrapBody(x, deref_type env t)
   | UnwrapBody(x, t) -> UnwrapBody(x, deref_type env t)
+
+let deref_def env =
+  function 
+  | TypeDef(x, t) -> 
+      TypeDef(x, deref_tycon env t)
+  | VarDef((x, t), et) -> 
+      VarDef((x, deref_type env t), deref_typed_expr env et)
+  | RecDef({ name = (x, ty_f); args = yts; body = et }) -> 
+      RecDef({ name = (x, deref_type env ty_f); 
+               args = List.map (fun (y, t) -> y, deref_type env t) yts; 
+               body = deref_typed_expr env et })
 
 let rec pattern ({ Env.venv = venv; tenv = tenv } as env) p =
   let _ = D.printf "Typing.pattern (%s)\n" (string_of_pattern p) in
@@ -314,15 +316,14 @@ let rec pattern ({ Env.venv = venv; tenv = tenv } as env) p =
         | t -> Printf.eprintf "invalid type : %s\n" (Type.string_of_t t); assert false
       end
         
-let rec g ({ Env.venv = venv; tenv = tenv } as env) ((e:expr), t) = (* 型推論ルーチン (caml2html: typing_g) *)
-  let _ = D.printf "Typing.g %s\n" (string_of_expr e) in
+let rec g ({ Env.venv = venv; tenv = tenv } as env) (expr, ty) = (* 型推論ルーチン (caml2html: typing_g) *)
+  let _ = D.printf "Typing.g %s\n" (string_of_expr expr) in
   try
-    let e', t' =
-      match e with
-      | Unit -> e, Type.App(Type.Unit, [])
-      | Nil _ -> assert false (* not implemented *)
-      | Bool(_) -> e, Type.App(Type.Bool, [])
-      | Int(_) -> e, Type.App(Type.Int, [])
+    let expr', ty' =
+      match expr with
+      | Unit -> expr, Type.App(Type.Unit, [])
+      | Bool(_) -> expr, Type.App(Type.Bool, [])
+      | Int(_) -> expr, Type.App(Type.Int, [])
       | Record(xets) -> 
           let xets', ts' = List.fold_left 
             (fun (xets, ts) (x, e) -> let e', t' = g env e in (x, (e', t')) :: xets, t' :: ts) ([], []) (List.rev xets) in 
@@ -339,12 +340,12 @@ let rec g ({ Env.venv = venv; tenv = tenv } as env) ((e:expr), t) = (* 型推論
                 end
             | t -> Printf.eprintf "invalid type : t = %s\n" (Type.string_of_t t); assert false
           end
-      | Field(e, x) ->
-          let e', t' = g env e in
-          let tf = instantiate env (M.find x tenv) in
-          let t2 = Type.Meta(Type.newmetavar ()) in
-          unify env tf (Type.Field(t', t2));
-          Field((e', t'), x), t2
+      | Field(et, x) ->
+          let _, ty_rec' as et' = g env et in
+          let ty_f = instantiate env (M.find x tenv) in
+          let ty_f' = Type.Meta(Type.newmetavar ()) in
+          unify env ty_f (Type.Field(ty_rec', ty_f'));
+          Field(et', x), ty_f'
       | Tuple(ets) ->
           let ets', ts' = List.fold_left (fun (ets, ts) e -> let e', t' = g env e in (e', t') :: ets, t' :: ts) ([], []) (List.rev ets) in
           Tuple(ets'), Type.App(Type.Tuple, ts')
@@ -353,14 +354,14 @@ let rec g ({ Env.venv = venv; tenv = tenv } as env) ((e:expr), t) = (* 型推論
           unify env (Type.App(Type.Bool, [])) t';
           Not(e', t'), Type.App(Type.Bool, [])
       | And(et1, et2) ->
-          let e1' , t1' = g env et1 in
-          let e2' , t2' = g env et2 in
+          let e1', t1' = g env et1 in
+          let e2', t2' = g env et2 in
           unify env (Type.App(Type.Bool, [])) t1';
           unify env (Type.App(Type.Bool, [])) t2';
           And((e1', t1'), (e2', t2')), Type.App(Type.Bool, [])
       | Or(et1, et2) ->
-          let e1' , t1' = g env et1 in
-          let e2' , t2' = g env et2 in
+          let e1', t1' = g env et1 in
+          let e2', t2' = g env et2 in
           unify env (Type.App(Type.Bool, [])) t1';
           unify env (Type.App(Type.Bool, [])) t2';
           Or((e1', t1'), (e2', t2')), Type.App(Type.Bool, [])
@@ -392,17 +393,6 @@ let rec g ({ Env.venv = venv; tenv = tenv } as env) ((e:expr), t) = (* 型推論
           unify env (Type.App(Type.Int, [])) t1';
           unify env (Type.App(Type.Int, [])) t2';
           Div((e1', t1'), (e2', t2')), Type.App(Type.Int, [])
-      | Cons _ -> assert false (* not implemented *)
-    (*        
-              | Cons(et1, et2) ->
-              let t1 = g env et1 in
-              let t2 = g env et2 in
-              (match t2 with
-              | Type.List(t2') -> 
-              let _ = unify t1 t2' in
-              Type.List(t2')
-              | _ -> raise (Unify(t1, t2)))
-    *)        
       | Eq(et1, et2) ->
           let e1', t1' = g env et1 in
           let e2', t2' = g env et2 in
@@ -420,32 +410,34 @@ let rec g ({ Env.venv = venv; tenv = tenv } as env) ((e:expr), t) = (* 型推論
           let e3', t3' = g env e3 in
           unify env t2' t3';
           If((e1', t1'), (e2', t2'), (e3', t3')), t2'
-      | Match(e, pets) ->
-          let e', t' = g env e in
+      | Match(et, pets) ->
+          let e', ty_e' = g env et in
           let pets', ts' = List.fold_left 
             (fun (pets, ts) (p, e) -> 
-              let env', t'' = pattern env p in
-              unify env t' t'';
+              let env', t' = pattern env p in
+              unify env ty_e' t';
               let e', t' = g env' e in
               (p, (e', t')) :: pets, t' :: ts) ([], []) (List.rev pets) in
           let t1' = List.hd ts' in
           List.iter (unify env t1') (List.tl ts');
-          Match((e', t'), pets'), t1'
+          Match((e', ty_e'), pets'), t1'
       | LetVar((x, t), et1, et2) -> (* letの型推論 (caml2html: typing_let) *)
           let e1', t1' = g env et1 in
           let t1' = generalize env t1' in (* 副作用は未サポートなので、Tiger本のp.335にある代入の判定はなし *)
           unify env t t1';
           let e2', t2' = g (Env.add_var env x t1') et2 in
           LetVar((x, t1'), (e1', t1'), (e2', t2')), t2'
-      | Var(x) when M.mem x venv -> e, instantiate env (M.find x venv) (* 変数の型推論 (caml2html: typing_var) *)
-      | Var(x) when M.mem x !Env.extenv.Env.venv -> e, instantiate env (M.find x !Env.extenv.Env.venv)
+      | Var(x) when M.mem x venv -> 
+          expr, instantiate env (M.find x venv) (* 変数の型推論 (caml2html: typing_var) *)
+      | Var(x) when M.mem x !Env.extenv.Env.venv -> 
+          expr, instantiate env (M.find x !Env.extenv.Env.venv)
       | Var(x) -> (* 外部変数の型推論 (caml2html: typing_extvar) *)
           Format.eprintf "free variable %s assumed as external@." x;
           let t = Type.Meta(Type.newmetavar ()) in
           Env.extenv := { !Env.extenv with Env.venv = M.add x t !Env.extenv.Env.venv };
-          e, instantiate env t
+          expr, instantiate env t
       | Constr(x, []) -> 
-          e, instantiate env (M.find x venv)
+          expr, instantiate env (M.find x venv)
       | Constr(x, ets) -> 
           let ets', ts' = List.fold_left (fun (ets, ts) e -> let e', t' = g env e in (e', t') :: ets, t' :: ts) ([], []) (List.rev ets) in
           begin
@@ -455,57 +447,67 @@ let rec g ({ Env.venv = venv; tenv = tenv } as env) ((e:expr), t) = (* 型推論
                 Constr(x, ets'), (L.last ys)
             | t -> Printf.eprintf "invalid type : t = %s\n" (Type.string_of_t t); assert false
           end
-      | LetRec({ name = (x, t); args = yts; body = et1 }, et2) -> (* let recの型推論 (caml2html: typing_letrec) *)
+      | LetRec({ name = (x, ty_f); args = yts; body = et1 }, et2) -> (* let recの型推論 (caml2html: typing_letrec) *)
           let t2 = Type.Meta(Type.newmetavar()) in
-          let t' = Type.App(Type.Arrow, ((List.map snd yts) @ [t2])) in
-          let e1', t1' = g { env with Env.venv = M.add_list yts (M.add x t' venv) } et1 in
-          unify env t t';
+          let ty_f' = Type.App(Type.Arrow, ((List.map snd yts) @ [t2])) in
+          let e1', t1' = g { env with Env.venv = M.add_list yts (M.add x ty_f' venv) } et1 in
+          unify env ty_f ty_f';
           unify env t2 t1';
-          let t'' = generalize env t' in
+          let t'' = generalize env ty_f' in
           let e2', t2' = g (Env.add_var env x t'') et2 in
           LetRec({ name = (x, t''); args = yts; body = (e1', t1') }, (e2', t2')), t2'
-      | App(e, ets) -> (* 関数適用の型推論 (caml2html: typing_app) *)
-          let e', t' = g env e in
+      | App(et, ets) -> (* 関数適用の型推論 (caml2html: typing_app) *)
+          let e', t' = g env et in
           let ets', ts' = List.fold_left (fun (ets, ts) e -> let e', t' = g env e in (e', t') :: ets, t' :: ts) ([], []) (List.rev ets) in
           let result = Type.Meta(Type.newmetavar ()) in
           unify env t' (Type.App(Type.Arrow, ts' @ [result]));
           App((e', t'), ets'), result
-      | WrapBody(_, t) -> e, t
-      | UnwrapBody(_, t) -> e, t in
-    unify env t t';
-    e', t'
+      | WrapBody(_, t) -> expr, t
+      | UnwrapBody(_, t) -> expr, t in
+    unify env ty ty';
+    expr', ty'
   with Unify(t1, t2) -> 
-    let _ = Printf.eprintf "Typing.g error %s : %s and %s\n" (string_of_expr e) (Type.string_of_t t1) (Type.string_of_t t2) in
-    raise (Error(deref_expr env e, deref_type env t1, deref_type env t2))
+    let _ = Printf.eprintf "Typing.g error %s : %s and %s\n" (string_of_expr expr) (Type.string_of_t t1) (Type.string_of_t t2) in
+    raise (Error(deref_expr env expr, deref_type env t1, deref_type env t2))
 
-let f' env (et, t) = 
+let f' env (et, ty) = 
   try 
-    let (e':expr), (t':Type.t) = g env (et:t) in
-    unify env t t';
-    Env.extenv := { !Env.extenv with Env.venv = M.map (deref_type env) !Env.extenv.Env.venv };
-    deref_typed_expr env (e', t')
+    let e', t' = g env et in
+    unify env ty t';
+    (e', t')
   with Unify _ -> failwith "type error."
-    
+
 let f defs = 
   
-  let { Env.venv = venv; tenv = tenv; tycons = tycons } as env = !Env.empty in
-  let empty'= { Env.venv = M.map (deref_type env) venv;
-                Env.tenv = M.map (deref_type env) tenv; 
-                Env.tycons = M.map (deref_tycon env) tycons; } in
-  Env.empty := empty';
-  
-  fold (fun ({ Env.venv = venv; tenv = tenv; tycons = tycons } as env, defs) def ->
-    let () = D.printf "Typing.f %s\n" (string_of_def def) in
-    let def' = 
-      match def with
-      | TypeDef(x, t) -> 
-          TypeDef(x, deref_tycon { env with Env.tycons = M.add x t tycons } t)
-      | VarDef((x, t), e) -> 
-          let (e':t) = f' env (e, t) in
-          VarDef((x, deref_type env t), e')
-      | RecDef({ name = (x, t); args = yts; body = e }) -> 
-          let e' = f' { env with Env.venv = M.add_list yts (M.add x t env.Env.venv) } (e, t) in
-          RecDef({ name = (x, deref_type env t); args = List.map (fun (y, t) -> (y, deref_type env t)) yts; body = e' }) in
-    def' :: defs) defs
+  let _, defs' = 
+    List.fold_left (fun ({ Env.venv = venv; tenv = tenv; tycons = tycons } as env, defs) def ->
+      let env', def' = 
+        match def with
+        | TypeDef(x, t) -> 
+            { Env.venv = M.add_list (Type.vars t) venv;
+              Env.tenv = M.add_list (Type.types t) tenv;
+              Env.tycons = M.add x t tycons }, 
+          TypeDef(x, t)
+        | VarDef((x, t), et) -> 
+            let et' = f' env (et, t) in
+            Env.add_var env x t, VarDef((x, t), et')
+        | RecDef({ name = (x, ty_f); args = yts; body = et }) -> 
+            let ty_r = Type.Meta(Type.newmetavar()) in
+            let ty_f' = Type.App(Type.Arrow, ((List.map snd yts) @ [ty_r])) in
+            let et' = f' { env with Env.venv = M.add_list yts (M.add x ty_f' env.Env.venv) } (et, ty_r) in
+            unify env ty_f ty_f';
+            let t'' = (generalize env ty_f') in
+            { env with Env.venv = M.add x t'' venv }, 
+            RecDef({ name = (x, t''); 
+                     args = yts;
+                     body = et' }) in
+      env', def' :: defs) (!Env.empty, []) defs in
 
-    
+  (* deref_def の中で未解決なメタ変数を型変数に置き換えてしまうので、すべての式の型推論が終わってから deref を呼ぶこと *)
+  let { Env.venv = venv; tenv = tenv; tycons = tycons } as env = !Env.empty in
+  Env.empty := { Env.venv = M.map (deref_type env) venv;
+                 Env.tenv = M.map (deref_type env) tenv; 
+                 Env.tycons = M.map (deref_tycon env) tycons; };
+  Env.extenv := { !Env.extenv with Env.venv = M.map (deref_type env) !Env.extenv.Env.venv };
+
+  fold (fun (env, defs) def -> deref_def env def :: defs) (List.rev defs')

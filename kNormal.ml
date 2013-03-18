@@ -5,9 +5,7 @@ type t = (* K正規化後の式 (caml2html: knormal_t) *)
     term * Type.t
 and term =
   | Unit
-  | Nil of Type.t
   | Exp of e
-  | Cons of Id.t * Id.t
   | If of e * t * t 
   | Match of Id.t * (pattern * t) list
   | Let of (Id.t * Type.t) * t * t
@@ -88,9 +86,7 @@ let rec string_of_typed_term (e, t) = (string_of_term e) ^ " : " ^ (Type.string_
 and string_of_term = 
   function
   | Unit -> "()"
-  | Nil _ -> "[]"
   | Exp(e) -> string_of_typed_expr e
-  | Cons _ -> assert false
   | If(e, e1, e2) -> "if " ^ (string_of_typed_expr e) ^ "\n\tthen " ^ (string_of_typed_term e1) ^ "\n\telse " ^ (string_of_typed_term e2)
   | Match(x, pes) -> "match " ^ x ^ " with\n" ^ (String.concat "\n" (List.map (fun (p, e) -> " | " ^ (ocaml_of_pattern p) ^ " -> " ^ (string_of_typed_term e)) pes))
   | Let((s1, t), e1, e2) -> "\nlet " ^ s1 ^ " : " ^ (Type.ocaml_of  t) ^ " = " ^ (string_of_typed_term e1) ^ " in\n" ^ (string_of_typed_term e2)
@@ -145,7 +141,6 @@ let rec g ({ Env.venv = venv; tenv = tenv } as env) (e, t) = (* K正規化ルー
   let e' = 
     match e with
     | Syntax.Unit -> Unit
-    | Syntax.Nil(t) -> Nil(t)
     | Syntax.Bool(b) -> Exp(Bool(b), t)
     | Syntax.Int(n) -> Exp(Int(n), t)
     | Syntax.Record(xes) ->
@@ -160,7 +155,6 @@ let rec g ({ Env.venv = venv; tenv = tenv } as env) (e, t) = (* K正規化ルー
     | Syntax.Sub(e1, e2) -> binop e1 e2 (fun e1' e2' -> Exp(Sub(e1', e2'), t))
     | Syntax.Mul(e1, e2) -> binop e1 e2 (fun e1' e2' -> Exp(Mul(e1', e2'), t))
     | Syntax.Div(e1, e2) -> binop e1 e2 (fun e1' e2' -> Exp(Div(e1', e2'), t))
-    | Syntax.Cons(e1, e2) -> assert false
     | Syntax.Var(x) -> Exp(Var(x), t)
     | Syntax.Constr(x, es) -> insert_lets es (fun es' -> Exp(Constr(x, es'), t))
     | Syntax.Eq(e1, e2) -> binop e1 e2 (fun e1' e2' -> Exp(Eq(e1', e2'), t))

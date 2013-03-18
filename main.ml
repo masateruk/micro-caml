@@ -2,16 +2,16 @@ let lexbuf outchan l = (* バッファをコンパイルしてチャンネルへ
   Id.counter := 0;
   output_string outchan
     (CFormat.f
-	(Optimize.f
-	    (C.f 
-		(Closure.f
-		    (Assoc.f 
-			(Alpha.f 
-			    (KNormal.f
-				(Wrap.f
-				    (Typing.f 
-					(Parser.impl Lexer.token l))))))))))
-
+	   (Optimize.f
+	      (C.f 
+		     (Closure.f
+		        (Assoc.f 
+			       (Alpha.f 
+			          (KNormal.f
+				         (Wrap.f
+				            (Typing.f 
+					           (Parser.f Lexer.token l))))))))))
+    
 let file input output = (* ファイルをコンパイルしてファイルに出力する (caml2html: main_file) *)
   let inchan = open_in input in
   let outchan = if output = "" then stdout else open_out output in

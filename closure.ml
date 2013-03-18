@@ -3,11 +3,9 @@ type t = (* クロージャ変換後の式 (caml2html: closure_t) *)
     term * Type.t
 and term =
   | Unit
-  | Nil of Type.t
   | WrapBody of Id.t * Type.t
   | UnwrapBody of Id.t * Type.t
   | Exp of e
-  | Cons of Id.t * Id.t
   | If of e * t * t
   | Match of Id.t * (pattern * t) list
   | Let of (Id.t * Type.t) * t * t
@@ -89,11 +87,9 @@ let rec string_of_typed_term (e, t) = (string_of_term e) ^ " : " ^ (Type.string_
 and string_of_term = 
   function
   | Unit -> "Unit"
-  | Nil(t) -> "Nil(" ^ (Type.string_of_t t) ^ ")"
   | WrapBody(x, t) -> "WrapBody(" ^ x ^ ", " ^ (Type.string_of_t t) ^ ")"
   | UnwrapBody(x, t) -> "UnwrapBody(" ^ x ^ ", " ^ (Type.string_of_t t) ^ ")"
   | Exp(e) -> "Exp(" ^ (string_of_typed_expr e) ^ ")"
-  | Cons(s1, s2) -> assert false
   | If(e1, e2, e3) -> "If(" ^ (string_of_typed_expr e1) ^ " then " ^ (string_of_typed_term e2) ^ " else " ^ (string_of_typed_term e3) ^ ")"
   | Match(x, pes) -> "Match(" ^ x ^ ", [" ^ (String.concat "; " (List.map (fun (p, e) -> (string_of_pattern p) ^ " -> " ^ (string_of_typed_term e)) pes)) ^ "])"
   | Let((x, t), e1, e2) -> "LetVar(" ^ x ^ " : " ^ (Type.string_of_t t) ^ " = " ^ (string_of_typed_term e1) ^ " in " ^ (string_of_typed_term e2) ^ ")"
@@ -131,9 +127,8 @@ let rec fv_of_expr (e, _) =
       
 let rec fv (e, _) = 
   match e with
-  | Unit | Nil _ | WrapBody _ | UnwrapBody _ -> S.empty
+  | Unit | WrapBody _ | UnwrapBody _ -> S.empty
   | Exp(e) -> fv_of_expr e
-  | Cons(x, y) -> S.of_list [x; y]
   | If(e, e1, e2) -> S.union (fv_of_expr e) (S.union (fv e1) (fv e2))
   | Match(x, pes) -> (List.fold_left (fun s (p, e) -> S.diff (S.union s (fv e)) (vars_of_pattern p)) S.empty pes)
   | Let((x, t), e1, e2) -> S.union (fv e1) (S.remove x (fv e2))
@@ -191,11 +186,9 @@ let rec g env known (e, t) = (* クロージャ変換ルーチン本体 (caml2ht
   let e' = 
     match e with 
     | KNormal.Unit -> Unit
-    | KNormal.Nil(t) -> Nil(t)
     | KNormal.WrapBody(x, t) -> WrapBody(x, t)
     | KNormal.UnwrapBody(x, t) -> UnwrapBody(x, t)
     | KNormal.Exp(e) -> Exp(h env known e)
-    | KNormal.Cons(x, y) -> assert false (* not implemented *)
     | KNormal.If(e, e1, e2) -> If(h env known e, g env known e1, g env known e2)
     | KNormal.Match(x, pes) -> Match(x, (List.map (fun (p, e) -> let env', p' = pattern env p in p', (g env' known e)) pes))
     | KNormal.Let((x, t), e1, e2) -> Let((x, t), g env known e1, g (M.add x t env) known e2)
