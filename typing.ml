@@ -402,6 +402,9 @@ let rec g ({ Env.venv = venv; tenv = tenv } as env) (expr, ty) = (* 型推論ル
           let e1', t1' = g env et1 in
           let e2', t2' = g env et2 in
           unify env t1' t2';
+          (* OCamlはLEは多相だけど、一旦Intにしておく。多相にすると、生成されるC言語ではポインタ同士の演算になるから *)
+          unify env (Type.App(Type.Int, [])) t1';
+          unify env (Type.App(Type.Int, [])) t2';
           LE((e1', t1'), (e2', t2')), Type.App(Type.Bool, [])
       | If(et1, et2, e3) ->
           let e1', t1' = g env et1 in

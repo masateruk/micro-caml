@@ -45,7 +45,9 @@ static inline ref_base_t* debug_new_ref_base(int size, void (*destructor)(ref_ba
 
 static inline void debug_delete_ref_base(ref_base_t* base)
 {
-    base->destructor(base);
+    if (base->destructor) {
+        base->destructor(base);
+    }
     debug_free(base);
 }
 
@@ -64,7 +66,9 @@ static inline ref_base_t* new_ref_base(int size, void (*destructor)(ref_base_t*)
 
 static inline void delete_ref_base(ref_base_t* base)
 {
-    base->destructor(base);
+    if (base->destructor) {
+        base->destructor(base);
+    }
     D_FREE(base);
 }
 

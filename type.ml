@@ -28,7 +28,7 @@ let rec string_of_t reached =
   function
   | Var(v) -> "Var(" ^ v ^ ")"
   | Field(tid, t) -> "Field(" ^ (string_of_t reached tid) ^ ", " ^ (string_of_t reached t) ^ ")"
-  | App(tycon, ts) -> "App(" ^ (string_of_tycon reached tycon) ^ ", [" ^ (String.concat "; " (List.map (string_of_t reached) ts)) ^ "])"
+  | App(tycon, ts) -> "App(" ^ (string_of_tycon reached tycon) ^ ", [" ^ (String.concat ", " (List.map (string_of_t reached) ts)) ^ "])"
   | Poly([], t)-> "Poly([], " ^ (string_of_t reached t) ^ ")"
   | Poly(xs, t)-> "Poly(" ^ (String.concat ", " xs) ^ ", " ^ (string_of_t reached t) ^ ")"
   | Meta{ contents = Some(t) } -> "Meta(Some(" ^ (string_of_t reached t) ^ "))"

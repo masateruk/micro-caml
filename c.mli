@@ -25,12 +25,11 @@ and expr =
   | Div of expr * expr
   | Eq of expr * expr
   | LE of expr * expr
-  | Cons of Id.t * Id.t
   | Var of Id.t
   | Cond of expr * expr * expr
-  | CallDir of expr * expr list
+  | AppCls of expr * expr list
+  | AppDir of expr * expr list
   | Let of (Id.t * CType.t) * expr * expr
-  | MakeClosure of Id.l * Id.t * (Id.t * CType.t) list
   | Sizeof of CType.t
   | Ref of expr
   | Deref of expr

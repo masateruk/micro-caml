@@ -1,6 +1,5 @@
-type foo = int
+type t = int
 
-let bar = 1
+let foo = 1
 
-let () = print_int bar
-
+let () = print_int foo

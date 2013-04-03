@@ -3,7 +3,7 @@ open C
 let prec = 
   function
   | Nop | Bool _ | Int _ | Struct _ | Var _ 
-  | CallDir _ | MakeClosure _ | FieldDot _  | FieldArrow _  | Sizeof _ | Ref _ | Deref _ | Cast _ -> 9
+  | AppCls _ | AppDir _ | FieldDot _  | FieldArrow _  | Sizeof _ | Ref _ | Deref _ | Cast _ -> 9
   | Not _ | Neg _ -> 8
   | Mul _ | Div _ -> 7
   | Add _ | Sub _  -> 6
@@ -13,7 +13,6 @@ let prec =
   | Or _ -> 2
   | Cond _ -> 1
   | Comma _ -> 0
-  | Cons _ -> assert false
   | Let _ -> assert false
   
 let indent depth = String.make (depth * 4) ' '
@@ -26,10 +25,12 @@ let rec string_of_type ?(depth = 0) ?(tags = []) =
   | CType.Enum(name, xs) -> (indent depth) ^ "enum " ^ name ^ " {\n" ^
       (String.concat ",\n" (List.map (fun x -> (indent (depth + 1)) ^ x) xs)) ^ "\n" ^ 
     (indent depth) ^ "}"
-  | CType.Fun _ -> assert false
-  | CType.Struct(tag, kind, xts) ->
+  | CType.Fun(ty_args, ty_r) -> 
+      (indent depth) ^ (string_of_type ~tags:tags ty_r) ^ " (*)(" ^
+        (String.concat ", " (List.map (string_of_type ~tags:tags) ty_args)) ^ ")"
+  | CType.Struct(tag, parent, xts) ->
       (indent depth) ^ "struct" ^ (if tag = "" then "" else " " ^ tag) ^ " {\n" ^ 
-        (match kind with CType.Ref -> (indent (depth + 1)) ^ "ref_base_t base;\n" | _ -> "") ^
+        (match parent with Some(t) -> (string_of_type ~depth:(depth + 1) ~tags:(tag::tags) t) ^ " base;\n" | None -> "") ^
         (String.concat ";\n" 
            (List.fold_left
               (fun s (x, t) -> 
@@ -48,6 +49,7 @@ let rec string_of_type ?(depth = 0) ?(tags = []) =
         (indent depth) ^ "}"
   | CType.NameTy(x', _) when List.mem x' tags -> (indent depth) ^ "struct " ^ x'
   | CType.NameTy(x', _) -> (indent depth) ^ x'
+  | CType.RefBase -> (indent depth) ^ "ref_base_t"
   | CType.Box -> (indent depth) ^ "sp_t"
   | CType.Pointer t -> (indent depth) ^ (string_of_type ~tags:tags t) ^ "*" 
   | CType.Nothing -> (indent depth)
@@ -80,12 +82,11 @@ let rec string_of_exp outer e =
     | Div(e1, e2) -> (string_of_exp inner e1) ^ " / " ^ (string_of_exp inner e2)
     | Eq(e1, e2) -> (string_of_exp inner e1) ^ " == " ^ (string_of_exp inner e2)
     | LE(e1, e2) -> (string_of_exp inner e1) ^ " <= " ^ (string_of_exp inner e2)
-    | Cons(x, y) -> x ^ " :: " ^ y
     | Var(x) -> x
     | Cond(e, e1, e2) -> (string_of_exp inner e) ^ " ? " ^ (string_of_exp inner e1) ^ " : " ^ (string_of_exp inner e2)
-    | CallDir(x, xs) ->  (string_of_exp inner x) ^ "(" ^ (String.concat ", " (List.map (string_of_exp (prec Comma)) xs)) ^ ")"
+    | AppCls(x, xs) ->  (string_of_exp inner x) ^ "->apply(" ^ (string_of_exp inner x) ^ ", " ^ (String.concat ", " (List.map (string_of_exp (prec Comma)) xs)) ^ ")"
+    | AppDir(x, xs) ->  (string_of_exp inner x) ^ "(" ^ (String.concat ", " (List.map (string_of_exp (prec Comma)) xs)) ^ ")"
     | Let((x, t), e1, e2)  -> "let " ^ (string_of_type t) ^ " " ^ x ^ " = " ^ (string_of_exp inner e1) ^ " in " ^ (string_of_exp inner e2)
-    | MakeClosure(Id.L(l), x, yts) -> l ^ "(" ^ x ^ ", " ^ (String.concat ", " (List.map fst yts)) ^ ")" 
     | Sizeof(t) -> "sizeof(" ^ (string_of_type t) ^ ")"
     | Ref(e) -> "&" ^ (string_of_exp inner e)
     | Deref(e) -> "*(" ^ (string_of_exp inner e) ^ ")"

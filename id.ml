@@ -9,9 +9,9 @@ let rec pp_list = function
 let counter = ref 0
 let genid s =
   incr counter;
-  Printf.sprintf "_%s%d" s !counter
+  Printf.sprintf "%s%d" s !counter
 
-let gentmp = genid
+let gentmp s = "_" ^ (genid s)
 
 let to_upper s = 
   String.uppercase (Str.global_replace (Str.regexp "\\([a-z0-9]\\)\\([A-Z]+\\)") "\\1_\\2" s)

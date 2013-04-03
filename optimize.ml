@@ -22,7 +22,7 @@ and reduce_addref_of_list = function
   | s::ss -> 
       begin
 	match s with
-	  | Exp(CallDir(Var("add_ref"), [e])) -> 
+	  | Exp(AppDir(Var("add_ref"), [e])) -> 
 	      let reduced, ss' = reduce_release_of_list e ss in
 		if reduced then ss' else s::ss'
 	  | If(e, s1, s2) -> 
@@ -37,7 +37,7 @@ and reduce_release_of_list e = function
   | s::ss -> 
       begin
 	match s with
-	  | Exp(CallDir(Var("release"), [e'])) when e = e' -> true, reduce_addref_of_list ss
+	  | Exp(AppDir(Var("release"), [e'])) when e = e' -> true, reduce_addref_of_list ss
 	  | If(e, s1, s2) -> 
 	      let r1, s1' = reduce_release e s1 in
 	      let r2, s2' = reduce_release e s2 in
@@ -75,8 +75,10 @@ let rec mark_ty defs t =
       | CType.NameTy(x, { contents = Some(t) }), TypeDef((x', t'), b) when x' = x && CType.identical t t' -> 
           begin
             match t with
-            | CType.Void | CType.Int | CType.Bool | CType.Enum _ | CType.Box | CType.Nothing | CType.NameTy(_, { contents = None }) -> ()
+            | CType.Void | CType.Int | CType.Bool | CType.Enum _ | CType.Box | CType.Nothing | CType.NameTy(_, { contents = None }) | CType.RefBase -> ()
             | CType.Fun(xs, y) -> List.iter (mark_ty defs) (y :: xs)
+            | CType.Struct(_, Some(ty), xts) ->
+                mark_ty defs ty; List.iter (mark_ty defs) (List.map snd xts)
             | CType.Struct(_, _, xts) 
             | CType.Union(xts) -> List.iter (mark_ty defs) (List.map snd xts)
             | CType.NameTy(_, { contents = Some(t) }) 
@@ -95,12 +97,11 @@ let rec mark_exp defs =
   | Not(e) | Neg(e) -> mark_exp defs e
   | And(e1, e2) | Or(e1, e2)
   | Add(e1, e2) | Sub(e1, e2) | Mul(e1, e2) | Div(e1, e2) | Eq(e1, e2) | LE(e1, e2) -> mark_exp defs e1; mark_exp defs e2
-  | Cons(x, y) -> mark_id defs x; mark_id defs y
   | Var(x) -> mark_id defs x
   | Cond(e, e1, e2) -> mark_exp defs e; mark_exp defs e1; mark_exp defs e2
-  | CallDir(e, es) -> mark_exp defs e; List.iter (mark_exp defs) es
+  | AppCls(e, es) -> mark_exp defs e; List.iter (mark_exp defs) es
+  | AppDir(e, es) -> mark_exp defs e; List.iter (mark_exp defs) es
   | Let _ -> assert false
-  | MakeClosure(Id.L(x), y, zts) -> mark_id defs x; mark_id defs y; List.iter (fun (z, t) -> mark_id defs z; mark_ty defs t) zts
   | Sizeof(t) -> mark_ty defs t
   | Ref(e) | Deref(e) -> mark_exp defs e
   | Cast(t, e) -> mark_ty defs t; mark_exp defs e
@@ -132,7 +133,7 @@ let rec mark defs =
 (* trueとの論理積, falseとの論理和を削除 *)
 let rec simplify_expr =
   function
-  | Int _ | Bool _ | Nop | Cons _ | Var _ | MakeClosure _ | Sizeof _ | Comma as e -> e
+  | Int _ | Bool _ | Nop | Var _ | Sizeof _ | Comma as e -> e
   | Struct(x, yes) -> Struct(x, List.map (fun (y, e) -> (y, simplify_expr e)) yes)
   | FieldDot(e, x) -> FieldDot(simplify_expr e, x)
   | FieldArrow(e, x) -> FieldArrow(simplify_expr e, x)
@@ -159,7 +160,8 @@ let rec simplify_expr =
   | Eq(e1, e2) -> Eq(simplify_expr e1, simplify_expr e2)
   | LE(e1, e2) -> LE(simplify_expr e1, simplify_expr e2)
   | Cond(e, e1, e2) -> Cond(simplify_expr e, simplify_expr e1, simplify_expr e2)
-  | CallDir(e, es) -> CallDir(simplify_expr e, List.map simplify_expr es)
+  | AppCls(e, es) -> AppCls(simplify_expr e, List.map simplify_expr es)
+  | AppDir(e, es) -> AppDir(simplify_expr e, List.map simplify_expr es)
   | Let(xt, e1, e2)  -> Let(xt, simplify_expr e1, simplify_expr e2)
   | Ref(e) -> Ref(simplify_expr e)
   | Deref(e) -> Deref(simplify_expr e)

@@ -2,35 +2,35 @@ type t = (* K正規化後の式 (caml2html: knormal_t) *)
     term * Type.t
 and term =
   | Unit
-  | Exp of e
-  | If of e * t * t 
+  | Exp of et
+  | If of et * t * t 
   | Match of Id.t * (pattern * t) list
   | Let of (Id.t * Type.t) * t * t
   | LetRec of fundef * t
   | WrapBody of Id.t * Type.t
   | UnwrapBody of Id.t * Type.t
-and e = 
+and et = 
     expr * Type.t
 and expr =
   | Bool of bool
   | Int of int
-  | Record of (Id.t * e) list
-  | Field of e * Id.t
-  | Tuple of e list
-  | Not of e
-  | And of e * e
-  | Or of e * e
-  | Neg of e
-  | Add of e * e
-  | Sub of e * e
-  | Mul of e * e
-  | Div of e * e
-  | Eq of e * e
-  | LE of e * e
+  | Record of (Id.t * et) list
+  | Field of et * Id.t
+  | Tuple of et list
+  | Not of et
+  | And of et * et
+  | Or of et * et
+  | Neg of et
+  | Add of et * et
+  | Sub of et * et
+  | Mul of et * et
+  | Div of et * et
+  | Eq of et * et
+  | LE of et * et
   | Var of Id.t
-  | Constr of Id.t * e list
-  | App of e * e list
-  | ExtFunApp of Id.t * e list
+  | Constr of Id.t * et list
+  | App of et * et list
+  | ExtFunApp of Id.t * et list
 and pattern =
   | PtBool of bool
   | PtInt of int
@@ -44,7 +44,7 @@ and def =
   | VarDef of (Id.t * Type.t) * t
   | RecDef of fundef
 val f : Syntax.def list -> def list
-val string_of_typed_expr : e -> Id.t
+val string_of_typed_expr : et -> Id.t
 val string_of_expr : expr -> Id.t
 val string_of_typed_term : t -> Id.t
 val string_of_term : term -> Id.t

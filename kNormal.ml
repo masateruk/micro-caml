@@ -5,35 +5,35 @@ type t = (* K正規化後の式 (caml2html: knormal_t) *)
     term * Type.t
 and term =
   | Unit
-  | Exp of e
-  | If of e * t * t 
+  | Exp of et
+  | If of et * t * t 
   | Match of Id.t * (pattern * t) list
   | Let of (Id.t * Type.t) * t * t
   | LetRec of fundef * t
   | WrapBody of Id.t * Type.t
   | UnwrapBody of Id.t * Type.t
-and e = 
+and et = 
     expr * Type.t
 and expr =
   | Bool of bool
   | Int of int
-  | Record of (Id.t * e) list
-  | Field of e * Id.t
-  | Tuple of e list
-  | Not of e
-  | And of e * e
-  | Or of e * e
-  | Neg of e
-  | Add of e * e
-  | Sub of e * e
-  | Mul of e * e
-  | Div of e * e
-  | Eq of e * e
-  | LE of e * e
+  | Record of (Id.t * et) list
+  | Field of et * Id.t
+  | Tuple of et list
+  | Not of et
+  | And of et * et
+  | Or of et * et
+  | Neg of et
+  | Add of et * et
+  | Sub of et * et
+  | Mul of et * et
+  | Div of et * et
+  | Eq of et * et
+  | LE of et * et
   | Var of Id.t
-  | Constr of Id.t * e list
-  | App of e * e list
-  | ExtFunApp of Id.t * e list
+  | Constr of Id.t * et list
+  | App of et * et list
+  | ExtFunApp of Id.t * et list
 and pattern =
   | PtBool of bool
   | PtInt of int
@@ -73,28 +73,27 @@ and string_of_expr =
   | Sub(e1, e2) -> (string_of_typed_expr e1) ^ " - " ^ (string_of_typed_expr e2)
   | Mul(e1, e2) -> (string_of_typed_expr e1) ^ " * " ^ (string_of_typed_expr e2)
   | Div(e1, e2) -> (string_of_typed_expr e1) ^ " / " ^ (string_of_typed_expr e2)
-  | Var(x) -> x
-  | Constr(x, []) -> x
-  | Constr(x, es) -> "(" ^ x ^ (String.concat ", " (List.map string_of_typed_expr es)) ^ ")"
+  | Var(x) -> "Var(" ^ x ^ ")"
+  | Constr(x, es) -> "Constr(" ^ x ^ ", [" ^ (String.concat ", " (List.map string_of_typed_expr es)) ^ "])"
   | Eq(e1, e2) -> (string_of_typed_expr e1) ^ " = " ^ (string_of_typed_expr e2)
   | LE(e1, e2) -> (string_of_typed_expr e1) ^ " <= " ^ (string_of_typed_expr e2) 
-  | App(e, args) -> "(" ^ (string_of_typed_expr e) ^ " " ^ (String.concat " " (List.map string_of_typed_expr args)) ^ ")"
-  | ExtFunApp(x, args) -> "(" ^ x ^ " " ^ (String.concat " " (List.map string_of_typed_expr args)) ^ ")"
+  | App(e, args) -> "App(" ^ (string_of_typed_expr e) ^ ", [" ^ (String.concat ", " (List.map string_of_typed_expr args)) ^ "])"
+  | ExtFunApp(x, args) -> "ExtFunApp(" ^ x ^ ", [" ^ (String.concat " " (List.map string_of_typed_expr args)) ^ "])"
 
 let rec string_of_typed_term (e, t) = (string_of_term e) ^ " : " ^ (Type.string_of_t t)
 
 and string_of_term = 
   function
   | Unit -> "()"
-  | Exp(e) -> string_of_typed_expr e
-  | If(e, e1, e2) -> "if " ^ (string_of_typed_expr e) ^ "\n\tthen " ^ (string_of_typed_term e1) ^ "\n\telse " ^ (string_of_typed_term e2)
-  | Match(x, pes) -> "match " ^ x ^ " with\n" ^ (String.concat "\n" (List.map (fun (p, e) -> " | " ^ (ocaml_of_pattern p) ^ " -> " ^ (string_of_typed_term e)) pes))
-  | Let((s1, t), e1, e2) -> "\nlet " ^ s1 ^ " : " ^ (Type.ocaml_of  t) ^ " = " ^ (string_of_typed_term e1) ^ " in\n" ^ (string_of_typed_term e2)
+  | Exp(e) -> "Exp(" ^ string_of_typed_expr e ^ ")"
+  | If(e, e1, e2) -> "If(" ^ (string_of_typed_expr e) ^ "then " ^ (string_of_typed_term e1) ^ "else " ^ (string_of_typed_term e2) ^ ")"
+  | Match(x, pes) -> "Match(" ^ x ^ ", [" ^ (String.concat "" (List.map (fun (p, e) -> " | " ^ (ocaml_of_pattern p) ^ " -> " ^ (string_of_typed_term e)) pes)) ^ "])"
+  | Let((s1, t), e1, e2) -> "Let(" ^ s1 ^ " : " ^ (Type.string_of_t  t) ^ " = " ^ (string_of_typed_term e1) ^ " in " ^ (string_of_typed_term e2) ^ ")"
   | LetRec({ name = (x, t); args = yts; body = e1 }, e2) -> 
-      "\nlet rec " ^ x ^ " " ^ (String.concat " " (List.map (fun (y, t) -> y) yts)) ^ " : " ^ (Type.ocaml_of  t) ^ " =\n"
-      ^ (string_of_typed_term e1) ^ " in\n" ^ (string_of_typed_term e2)
-  | WrapBody(x, t) -> "(* wrapper " ^ x ^ " " ^ (Type.string_of_t t) ^ " *)"
-  | UnwrapBody(x, t) -> "(* unwrapper " ^ x ^ " " ^ (Type.string_of_t t) ^ " *)"
+      "LetRec(" ^ x ^ ", [" ^ (String.concat ", " (List.map (fun (y, t) -> y) yts)) ^ " : " ^ (Type.string_of_t  t) ^ "] = "
+      ^ (string_of_typed_term e1) ^ " in " ^ (string_of_typed_term e2) ^ ")"
+  | WrapBody(x, t) -> "WrapBody(" ^ x ^ ", " ^ (Type.string_of_t t) ^ ")"
+  | UnwrapBody(x, t) -> "UnwrapBody(" ^ x ^ ", " ^ (Type.string_of_t t) ^ ")"
 
 let rec insert_let (e, t) k = (* letを挿入する補助関数 (caml2html: knormal_insert) *)
   match e with

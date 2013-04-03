@@ -4,14 +4,13 @@ type t =
   | Bool
   | Enum of Id.t * Id.t list
   | Fun of t list * t
-  | Struct of Id.t * kind * (Id.t * t) list
+  | Struct of Id.t * t option * (Id.t * t) list (* tag name * parent type * fields *)
   | Union of (Id.t * t) list
   | NameTy of Id.t * t option ref
+  | RefBase
   | Box
   | Pointer of t
   | Nothing
-
-and kind = Normal | Ref | Closure
 
 let rec string_of_t reached t = 
   match t with
@@ -20,9 +19,9 @@ let rec string_of_t reached t =
   | Int -> "Int" 
   | Enum(x, ys) -> "Enum(" ^ x ^ ", [" ^ (String.concat "," ys) ^ "])"
   | Fun(args, ret) -> "Fun([" ^ (String.concat ", " (List.map (string_of_t (t ::reached)) args)) ^ "] -> " ^ (string_of_t (t ::reached) ret) ^ ")" 
-  | Struct(tag, kind, _) when List.mem t reached -> "Struct " ^ tag
-  | Struct(tag, kind, xts) -> 
-      "Struct " ^ tag ^ ", " ^ (string_of_kind kind) ^ ", (" ^ 
+  | Struct(tag, _, _) when List.mem t reached -> "Struct " ^ tag
+  | Struct(tag, parent, xts) -> 
+      "Struct " ^ tag ^ ", " ^ (match parent with Some(t) -> string_of_t reached t | _ -> "") ^ ", (" ^ 
         (String.concat ", " (List.map (fun (x, t') -> x ^ " : " ^ (string_of_t (t ::reached) t')) xts)) ^ 
         ")" 
   | Union(xts) -> 
@@ -31,28 +30,24 @@ let rec string_of_t reached t =
         ")" 
   | NameTy(x, { contents = Some(t') }) -> "NameTy(" ^ x ^ ", Some(" ^ (string_of_t (t ::reached) t') ^ "))"
   | NameTy(x, _) -> "NameTy(" ^ x ^ ", None)"
+  | RefBase -> "RefBase"
   | Box -> "Box" 
   | Pointer t -> "Pointer(" ^ (string_of_t (t ::reached) t) ^ ")" 
   | Nothing -> "Nothing"
 
-and string_of_kind = 
-  function
-  | Normal -> "Normal"
-  | Ref -> "Ref"
-  | Closure -> "Closure"
-
 let string_of_t = string_of_t []
 
+let rec is_ref_base =
+  function
+  | RefBase -> true
+  | Struct(_, Some(t), _) | NameTy(_, { contents = Some(t) }) -> is_ref_base t
+  | Struct(_, None, _) | Box | Void | Int | Bool | Enum _ | Fun _ | Union _ | Pointer _ | Nothing | NameTy _ -> false 
+
 let is_ref_pointer =
-  let rec is_ref_base =
-    function
-    | Struct(_, Ref, _) -> true
-    | NameTy(_, { contents = Some(t) }) -> is_ref_base t
-    | Box | Void | Int | Bool | Enum _ | Fun _ | Union _ | Pointer _ | Nothing | Struct _ | NameTy _ -> false in
   function
   | Box -> true
   | Pointer(t) -> is_ref_base t
-  | Void | Int | Bool | Enum _ | Fun _ | Union _ | Nothing | Struct _ | NameTy _ -> false
+  | Void | Int | Bool | Enum _ | Fun _ | Union _ | Nothing | Struct _ | NameTy _ | RefBase -> false
 
 let rec identical t1 t2 = 
   t1 == t2 ||
@@ -101,12 +96,31 @@ let rec prefix =
   | Struct("", _, _) -> "st"
   | Struct(x, _, _) -> x
   | Union _ -> "u"
+  | RefBase -> "r"
   | Box -> "p" 
   | Pointer _ -> "p"
   | Nothing -> assert false
 
+
+let rec id = 
+  function
+  | Void -> "void"
+  | Int -> "int"
+  | Bool -> "bool"
+  | Enum("", _) -> "int"
+  | Enum(x, _) -> x
+  | Fun _ -> "fun"
+  | Struct("", _, _) -> "st"
+  | Struct(x, _, _) -> x
+  | NameTy(x, _) -> x
+  | RefBase -> "ref"
+  | Union _ -> "u"
+  | Box -> "sp" 
+  | Pointer(t) -> (id t) ^ "ptr"
+  | Nothing -> ""
+
 let reflist = ref None
-let list_body = Struct("list", Ref, [("type", Int); ("u", Union([("Cons", Struct("Cons", Normal, [("head", Box); ("tail", Pointer(NameTy("list", reflist)))])); ("Nil", Nothing)]))])
+let list_body = Struct("list", Some(RefBase), [("type", Int); ("u", Union([("Cons", Struct("Cons", None, [("head", Box); ("tail", Pointer(NameTy("list", reflist)))])); ("Nil", Nothing)]))])
 let list = 
   let list = NameTy("list", ref (Some(list_body))) in
   reflist := Some(list);
