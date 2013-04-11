@@ -1283,7 +1283,7 @@ clean-doc::
 	rm -rf $(DOC_DIR)/$(RESULT)
 
 .PHONY: clean-all
-clean-all:: clean clean-doc clean-test clean-lib
+clean-all:: clean clean-doc clean-test clean-lib clean-example
 
 .PHONY: nobackup
 nobackup:

@@ -15,7 +15,7 @@ export V ?= 0
 export TESTS ?=
 TRASH = *.cmt *.cmti *.annot .typerex parser.output
 
-.PHONY:all debug-check do-test full_test lib clean-test
+.PHONY:all debug-check do-test full_test lib clean-test example clean-example
 
 all:debug-code $(RESULT) lib
 
@@ -33,7 +33,13 @@ clean-test:
 clean-lib:
 	make -C lib clean
 
+clean-example:
+	make -C example clean
+
 lib: 
 	make -C lib
+
+example: $(RESULT)
+	make -C example
 
 include OCamlMakefile
