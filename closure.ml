@@ -218,8 +218,8 @@ let rec g venv known (expr, ty) = (* クロージャ変換ルーチン本体 (ca
     | KNormal.Let((x, t), e1, e2) -> Let((x, t), g venv known e1, g (M.add x t venv) known e2)
     | KNormal.LetRec({ KNormal.name = (x, ty_f); KNormal.args = yts; KNormal.body = e1 }, e2) -> (* 関数定義の場合 (caml2html: closure_letrec) *)
         (* 関数定義let rec x y1 ... yn = e1 in e2の場合は、
-	   xに自由変数がない(closureを介さずdirectに呼び出せる)
-	   と仮定し、knownに追加してe1をクロージャ変換してみる *)
+	       xに自由変数がない(closureを介さずdirectに呼び出せる)
+	       と仮定し、knownに追加してe1をクロージャ変換してみる *)
         let toplevel_backup = !toplevel in
         let venv' = M.add x ty_f venv in
         let known' = S.add x known in
@@ -229,25 +229,23 @@ let rec g venv known (expr, ty) = (* クロージャ変換ルーチン本体 (ca
            (thanks to nuevo-namasute and azounoman; test/cls-bug2.ml参照) *)
         let zs = S.diff (fv e1') (S.of_list ((List.map fst yts) @ (ids_of_defs !toplevel))) in
         let known', e1' =
-	  if S.is_empty zs then (D.printf "function %s doesn't have free variables.\n" x; known', e1')
+	      if S.is_empty zs then (D.printf "function %s doesn't have free variables.\n" x; known', e1')
           (* 駄目だったら状態(toplevelの値)を戻して、クロージャ変換をやり直す *)
           else (D.printf "free variable(s) %s found in function %s@.\n" (Id.pp_list (S.elements zs)) x;
-	        D.printf "function %s cannot be directly applied in fact@.\n" x;
-	        toplevel := toplevel_backup;
-	        let e1' = g (M.add_list yts venv') known e1 in
-	        known, e1') in
+	            D.printf "function %s cannot be directly applied in fact@.\n" x;
+	            toplevel := toplevel_backup;
+	            let e1' = g (M.add_list yts venv') known e1 in
+	            known, e1') in
         let zs = S.elements (S.diff (fv e1') (S.add x (S.of_list ((List.map fst yts) @ (ids_of_defs !toplevel))))) in
         let zts = List.map (fun z -> z, M.find z venv') zs in (* ここで自由変数zの型を引くために引数venvが必要 *)
-        let () = D.printf "Add FunDef(%s)\n" x in
         toplevel := FunDef{ name = (Id.L(x), ty_f); args = yts; formal_fv = zts; body = e1' } :: !toplevel; (* トップレベル関数を追加 *)
         let e2' = g venv' known' e2 in
         if S.mem x (fv e2') then (* xが変数としてe2'に出現するか。ただし、自由変数がないときはクロージャをつくらず関数ポイントとして使用する *)
-          let () = D.printf "MakeCls(%s) !!!\n" x in
-	  MakeCls((x, ty_f), { entry = Id.L(x); actual_fv = zs }, e2') (* 出現していたら削除しない *)
+	    MakeCls((x, ty_f), { entry = Id.L(x); actual_fv = zs }, e2') (* 出現していたら削除しない *)
         else (D.printf "eliminating closure(s) %s@.\n" x;
-	      fst e2') (* 出現しなければMakeClsを削除 *) in
+	          fst e2') (* 出現しなければMakeClsを削除 *) in
   (expr', ty)
-      
+    
 let f' { Env.venv = venv } e = 
   let venv = M.union venv !Env.extenv.Env.venv in
   let known = M.fold (fun x _ known -> S.add x known) venv S.empty in

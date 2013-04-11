@@ -374,13 +374,23 @@ let make_closure ty fvs =
             Block([dec], Return(AppDir(FieldArrow(Var(var), "pfn"), (List.map (fun (x, t) -> FieldArrow(Var(var), x)) fvs) @ (List.map (fun (x, _) -> Var(x)) args)))) in
           FunDef({ name = Id.L(name); args = args; body = body; ret = ty_r }, ref true) in
         
+        let closure_destructor ty_c =
+          let args = [("base", CType.Pointer(CType.NameTy("ref_base_t", { contents = None })))] in
+          let body = let p = "p" in
+                     let dec = VarDec((p, CType.Pointer(ty_c)), Some(Cast(CType.Pointer(ty_c), Var("base")))) in
+                     let release_fields = List.fold_right (fun (x, t) s -> 
+                       if CType.is_ref_pointer t then (Seq(s, Exp(AppDir(Var("release"), [FieldArrow(Var(p), x)])))) else s) fvs (Exp(Nop)) 
+                     in
+                     Block([dec], release_fields) in
+          FunDef({ name = Id.L("destruct_" ^ (string_of_type ty_c)); args = args; body = body; ret = CType.Void }, ref false) in
+
         let closure_constructor apply ty_c =
           let args, body =
             let var = "p" in
-            let dec = VarDec((var, CType.Pointer(ty_c)), Some(Cast(CType.Pointer(ty_c), AppDir(Var("new_ref_base"), [Sizeof(ty_c); Var("NULL")])))) in
+            let dec = VarDec((var, CType.Pointer(ty_c)), Some(Cast(CType.Pointer(ty_c), AppDir(Var("new_ref_base"), [Sizeof(ty_c); Var("destruct_" ^ (string_of_type ty_c))])))) in
             let assign_apply = Assign(FieldDot(FieldArrow(Var(var), "base"), "apply"), Var(apply)) in
             let assign_fun = Assign(FieldArrow(Var(var), "pfn"), Var("pfn")) in
-            let assign_fvs = List.fold_right (fun (x, t) s -> (Seq(Assign(FieldArrow((Var(var), x)), Var(x)), s))) fvs (Return(Cast(CType.Pointer(ty_f), Var(var)))) in
+            let assign_fvs = List.fold_right (fun (x, t) s -> (Seq(assign (FieldArrow((Var(var), x)), t) (Var(x)), s))) fvs (Return(Cast(CType.Pointer(ty_f), Var(var)))) in
             ("pfn", CType.Fun(ty_args, ty_r)) :: fvs, Block([dec], Seq(assign_apply, Seq(assign_fun, assign_fvs))) in
           FunDef({ name = Id.L("make_" ^ (string_of_type ty_c)); args = args; body = body; ret = CType.Pointer(ty_f) }, ref false) in
         
@@ -391,6 +401,7 @@ let make_closure ty fvs =
         let ty_c = CType.NameTy(name, { contents = Some(ty_c) }) in
         let apply_fun_name = "apply_" ^ (string_of_type ty_c) in
         toplevel := (apply_closure apply_fun_name ty_c) :: !toplevel;
+        toplevel := (closure_destructor ty_c) :: !toplevel;
         toplevel := (closure_constructor apply_fun_name ty_c) :: !toplevel;
         ty_c
   in
