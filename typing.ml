@@ -50,6 +50,7 @@ let rec unify ({ Env.tycons = tycons } as env) ty1 ty2 = (* 型が合うよう�
     | Type.App(Type.Unit, xs), Type.App(Type.Unit, ys) 
     | Type.App(Type.Bool, xs), Type.App(Type.Bool, ys) 
     | Type.App(Type.Int, xs), Type.App(Type.Int, ys) 
+    | Type.App(Type.Tuple, xs), Type.App(Type.Tuple, ys) 
     | Type.App(Type.Arrow, xs), Type.App(Type.Arrow, ys) -> List.iter2 unify' xs ys
     | Type.App(Type.Record(x, fs), xs), Type.App(Type.Record(y, fs'), ys) when fs = fs' -> List.iter2 unify' xs ys
     | Type.App(Type.Variant(x, constrs), xs), Type.App(Type.Variant(y, constrs'), ys) when x = y -> 

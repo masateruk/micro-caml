@@ -45,6 +45,7 @@ type prog = Prog of def list
     
 exception Concat of t
     
+let failure = AppDir(Var("assert"), [Bool(false)])
 let enable_gc = ref false
   
 let gentmp t = Id.gentmp (CType.prefix t)
@@ -195,10 +196,61 @@ let block stm =
   let decs, s' = collect_decs stm in
   Block(List.rev decs, release_boxes decs s')
     
+(* 参照カウンタ使用時、Box型の変数はカウンタ操作が必要なため一時変数に代入する *)
+let rec insert_let (expr, ty) k =  
+  match expr, ty with
+  | Var(x), _ -> k (expr, ty)
+  | Let(yt, e1, e2), _ ->
+      let e3, t3 = insert_let (e2, ty) k in
+      Let(yt, e1, e3), t3
+  | e, t when (CType.is_ref_pointer t) && (not !enable_gc) ->
+      let x = gentmp t in
+      let e2, t2 = k ((Var(x)), t) in
+      Let((x, t), e, e2), t2
+  | e, t -> k (e, t)
+      
+(* LetをDecに変換 *)
+let rec insert_dec (expr, ty) k = 
+  match expr with
+  | Let(xt, e1, e2) -> 
+      let s, t = insert_dec (e2, ty) k in 
+      Seq(Dec(xt, Some(e1)), s), t
+  | e -> k (e, ty)
+      
+(* 文で値を返すために戻り値に代入する文を挿入する *)
+let rec insert_assign (expr, ty) stm = 
+  match stm with
+  | Exp(exp) when exp = failure -> stm
+  | Exp(exp) -> assign (expr, ty) exp
+  | If(pred, s1, s2) -> If(pred, insert_assign (expr, ty) s1, insert_assign (expr, ty) s2)
+  | Seq(s1, s2) -> Seq(s1, insert_assign (expr, ty) s2)
+  | Block(decs, s) -> Block(decs, insert_assign (expr, ty) s)
+  | Dec _ | Assign _ | Return _ -> Printf.eprintf "invalid statement : %s\n" (string_of_statement 0 stm); assert false
+    
+(* if文で値を返すための変換 *)
+let rec insert_assign_in_if (stm, ty) =
+  let rec block_if_body =
+    function
+    | If(pred, s1, (If _ as s2)) -> If(pred, block s1, block_if_body s2)
+    | If(pred, s1, s2) -> If(pred, block s1, block s2)  
+    | s -> block s 
+  in
+  match stm with
+  | If(pred, Exp(e1), Exp(e2)) -> Exp(Cond(pred, e1, e2)), ty
+  | If _ -> 
+      begin
+        match ty with
+        | CType.Void -> block_if_body stm, ty
+        | t -> let x = gentmp t in 
+               let s' = block_if_body (insert_assign (Var(x), t) stm) in
+               (Seq(Dec((x, t), None), Seq(s', Exp(Var(x))))), t
+      end
+  | _ -> Printf.eprintf "invalid statement : %s\n" (string_of_statement 0 stm); assert false
+
 let wrap_body x t = 
   if CType.is_ref_pointer t then (Exp(Cast(CType.Box, Var(x))))
   else (Seq(Dec(("p", CType.Box), None), 
-            Seq(Assign(Var("p"), AppDir(Var("new_box"), [Sizeof(t)])),
+            Seq(Assign(Var("p"), AppDir(Var("new_box"), [Sizeof(t); Var("ref_equal_" ^ (string_of_type t))])),
                 Seq(Assign(Deref(Cast(CType.Pointer(t), AppDir(Var("sp_get"), [Var("p")]))), Var(x)),
                     Exp(Var("p"))))))
     
@@ -219,7 +271,6 @@ let rec concat s1 (x, t) s2 =
       end
       
 let toplevel : def list ref = ref []
-let failure = AppDir(Var("assert"), [Bool(false)])
 
 let predef_tenv = M.add_list [
   ("list", CType.list_body);
@@ -229,6 +280,75 @@ let predef_venv = M.add_list [
   ("Nil",          CType.Fun([], CType.Pointer(CType.list)));
   ("Cons",         CType.Fun([CType.Box; CType.Pointer(CType.list)], CType.Pointer(CType.list)));
 ] M.empty
+
+let equal ty = 
+  let ty = if CType.is_pointer ty then CType.deref ty else ty in
+  "equal_" ^ (string_of_type ty)
+
+let rec equal_expr (a, b) =
+  function
+  | ty ->   
+      if CType.is_ref_pointer ty then 
+      AppDir(Var("equal_r"), [a; b])
+      else if CType.has_equal ty && CType.is_pointer ty then
+      AppDir(Var(equal ty), [a; b])
+      else if CType.has_equal ty then
+      AppDir(Var(equal ty), [Ref(a); Ref(b)])
+      else if CType.is_pointer ty then
+      equal_expr (Deref(a), Deref(b)) (CType.deref ty)
+      else
+      Eq(a, b)
+
+let rec equal_stm (a, b) (deref, arrow) =
+  function
+  | CType.NameTy(x, { contents = Some(ty) }) -> equal_stm (a, b) (deref, arrow) ty
+  | CType.NameTy(x, { contents = None }) -> assert false
+  | CType.Pointer ty -> equal_stm (a, b) ((fun e -> Deref(e)), (fun (e, x) -> FieldArrow(e, x))) ty
+  | CType.Struct(x, parent, ["type", CType.Int; "u", CType.Union(yts)]) ->
+      let equal_each_struct = 
+        List.fold_right (fun (y, t) s ->
+          let e = 
+            match t with
+            | CType.Nothing -> Bool(true)
+            | CType.Struct(_, _, zts) -> 
+                List.fold_left (fun e (z, t) -> And(e, equal_expr (arrow(a, "u." ^ y ^ "." ^ z), arrow(b, "u." ^ y ^ "." ^ z)) t)) (Bool(true)) zts
+            | t -> assert false in
+          let equal_type = Eq(arrow(a, "type"), Var(Id.to_upper y)) in
+          If(equal_type, block (Exp(e)), s))
+          yts (block (Exp(Bool(false)))) in
+      let s = If(Eq(arrow(a, "type"), arrow(b, "type")), equal_each_struct, (Exp(Bool(false)))) in
+      let e, _ = insert_assign_in_if (s, CType.Bool) in
+      insert_return (CType.Bool) e 
+  | CType.Struct(_, _, xts) -> 
+      Return(List.fold_left (fun e (x, t) -> And(e, equal_expr (arrow(a, x), arrow(b, x)) t)) (Bool(true)) xts)
+  | t -> Return(equal_expr (a, b) t) 
+
+let equal_stm (a, b) = equal_stm (a, b) ((fun e -> e), (fun (e, x) -> FieldDot(e, x)))
+
+let equal_fun ty = 
+  let ptr = CType.Pointer(ty) in
+  let a = gentmp ptr in
+  let b = gentmp ptr in
+  FunDef({ name = Id.L(equal ty);
+           args = [(a, ptr); (b, ptr)];
+           body = block (equal_stm (Var(a), Var(b)) ptr);
+           ret = CType.Bool }, ref true)
+
+let ref_equal ty = "ref_equal_" ^ (string_of_type ty)
+  
+let ref_equal_fun ty = 
+  let ptr = CType.Pointer(ty) in
+  let pa = gentmp CType.ref_base_ptr in
+  let pb = gentmp CType.ref_base_ptr in
+  FunDef({ name = Id.L(ref_equal ty);
+           args = [(pa, CType.ref_base_ptr); (pb, CType.ref_base_ptr)];
+           body = (let a = gentmp ty in
+                   let b = gentmp ty in
+                   let dec = [VarDec((a, ptr), Some(Cast(ptr, Var(pa))));
+                              VarDec((b, ptr), Some(Cast(ptr, Var(pb))))] in
+                   let s = Return(AppDir(Var(equal ty), [Var(a); Var(b)])) in
+                   (Block(dec, s)));
+           ret = CType.Bool }, ref true)
 
 let find_name_ty ty = 
   let find_predef t = 
@@ -265,8 +385,11 @@ let name_ty ty =
   try find_name_ty ty with
   | Not_found ->
       let name = (gentmp ty) ^ "_t" in
-      toplevel := TypeDef((name, ty), ref false) :: !toplevel;
-      CType.NameTy(name, { contents = Some(ty) })
+      toplevel := TypeDef((name, ty), ref true (* TBD *)) :: !toplevel;
+      let ty = CType.NameTy(name, { contents = Some(ty) }) in
+      toplevel := (equal_fun ty) :: !toplevel;
+      toplevel := (ref_equal_fun ty) :: !toplevel;
+      ty
         
 let fun_str ty_args ty_r =
   let name = "fun_" ^ (String.concat "_" (List.map CType.id ty_args)) ^ "_to_" ^ (CType.id ty_r) ^ "_t" in
@@ -374,6 +497,9 @@ let make_closure ty fvs =
             Block([dec], Return(AppDir(FieldArrow(Var(var), "pfn"), (List.map (fun (x, t) -> FieldArrow(Var(var), x)) fvs) @ (List.map (fun (x, _) -> Var(x)) args)))) in
           FunDef({ name = Id.L(name); args = args; body = body; ret = ty_r }, ref true) in
         
+        let closure_equal ty_c = equal_fun ty_c in
+        let closure_ref_equal ty_c = ref_equal_fun ty_c in
+
         let closure_destructor ty_c =
           let args = [("base", CType.Pointer(CType.NameTy("ref_base_t", { contents = None })))] in
           let body = let p = "p" in
@@ -387,7 +513,9 @@ let make_closure ty fvs =
         let closure_constructor apply ty_c =
           let args, body =
             let var = "p" in
-            let dec = VarDec((var, CType.Pointer(ty_c)), Some(Cast(CType.Pointer(ty_c), AppDir(Var("new_ref_base"), [Sizeof(ty_c); Var("destruct_" ^ (string_of_type ty_c))])))) in
+            let dec = VarDec((var, CType.Pointer(ty_c)), Some(Cast(CType.Pointer(ty_c), AppDir(Var("new_ref_base"), [Sizeof(ty_c); 
+                                                                                                                     Var("destruct_" ^ (string_of_type ty_c));
+                                                                                                                     Var("ref_equal_" ^ (string_of_type ty_c))])))) in
             let assign_apply = Assign(FieldDot(FieldArrow(Var(var), "base"), "apply"), Var(apply)) in
             let assign_fun = Assign(FieldArrow(Var(var), "pfn"), Var("pfn")) in
             let assign_fvs = List.fold_right (fun (x, t) s -> (Seq(assign (FieldArrow((Var(var), x)), t) (Var(x)), s))) fvs (Return(Cast(CType.Pointer(ty_f), Var(var)))) in
@@ -401,62 +529,13 @@ let make_closure ty fvs =
         let ty_c = CType.NameTy(name, { contents = Some(ty_c) }) in
         let apply_fun_name = "apply_" ^ (string_of_type ty_c) in
         toplevel := (apply_closure apply_fun_name ty_c) :: !toplevel;
+        toplevel := (closure_equal ty_c) :: !toplevel;
+        toplevel := (closure_ref_equal ty_c) :: !toplevel;
         toplevel := (closure_destructor ty_c) :: !toplevel;
         toplevel := (closure_constructor apply_fun_name ty_c) :: !toplevel;
         ty_c
   in
   ty_f, "make_" ^ (string_of_type ty_c)
-
-(* 参照カウンタ使用時、Box型の変数はカウンタ操作が必要なため一時変数に代入する *)
-let rec insert_let (expr, ty) k =  
-  match expr, ty with
-  | Var(x), _ -> k (expr, ty)
-  | Let(yt, e1, e2), _ ->
-      let e3, t3 = insert_let (e2, ty) k in
-      Let(yt, e1, e3), t3
-  | e, t when (CType.is_ref_pointer t) && (not !enable_gc) ->
-      let x = gentmp t in
-      let e2, t2 = k ((Var(x)), t) in
-      Let((x, t), e, e2), t2
-  | e, t -> k (e, t)
-      
-(* LetをDecに変換 *)
-let rec insert_dec (expr, ty) k = 
-  match expr with
-  | Let(xt, e1, e2) -> 
-      let s, t = insert_dec (e2, ty) k in 
-      Seq(Dec(xt, Some(e1)), s), t
-  | e -> k (e, ty)
-      
-(* 文で値を返すために戻り値に代入する文を挿入する *)
-let rec insert_assign (expr, ty) stm = 
-  match stm with
-  | Exp(exp) when exp = failure -> stm
-  | Exp(exp) -> assign (expr, ty) exp
-  | If(pred, s1, s2) -> If(pred, insert_assign (expr, ty) s1, insert_assign (expr, ty) s2)
-  | Seq(s1, s2) -> Seq(s1, insert_assign (expr, ty) s2)
-  | Block(decs, s) -> Block(decs, insert_assign (expr, ty) s)
-  | Dec _ | Assign _ | Return _ -> Printf.eprintf "invalid statement : %s\n" (string_of_statement 0 stm); assert false
-    
-(* if文で値を返すための変換 *)
-let rec insert_assign_in_if (stm, ty) =
-  let rec block_if_body =
-    function
-    | If(pred, s1, (If _ as s2)) -> If(pred, block s1, block_if_body s2)
-    | If(pred, s1, s2) -> If(pred, block s1, block s2)  
-    | s -> block s 
-  in
-  match stm with
-  | If(pred, Exp(e1), Exp(e2)) -> Exp(Cond(pred, e1, e2)), ty
-  | If _ -> 
-      begin
-        match ty with
-        | CType.Void -> block_if_body stm, ty
-        | t -> let x = gentmp t in 
-               let s' = block_if_body (insert_assign (Var(x), t) stm) in
-               (Seq(Dec((x, t), None), Seq(s', Exp(Var(x))))), t
-      end
-  | _ -> Printf.eprintf "invalid statement : %s\n" (string_of_statement 0 stm); assert false
 
 let rec pattern (venv, tenv as env) (expr, ty) p =
   let _ = D.printf "C.pattern (%s, %s) %s\n" (string_of_expr expr) (CType.string_of_t ty) (Closure.string_of_pattern p) in
@@ -541,8 +620,8 @@ let rec g' (venv, tenv as env) ids (expr, ty) = (* C言語の式生成 (caml2htm
 
   let binop et1 et2 f ty =
     insert_let (g' env ids et1) 
-      (fun (e1', _) ->
-        insert_let (g' env ids et2) (fun (e2', _) -> f e1' e2', ty)) 
+      (fun et1' ->
+        insert_let (g' env ids et2) (fun et2' -> f et1' et2', ty)) 
   in
 
   match expr with
@@ -550,14 +629,14 @@ let rec g' (venv, tenv as env) ids (expr, ty) = (* C言語の式生成 (caml2htm
   | Closure.Int(n) -> Int(n), CType.Int
   | Closure.Not(et) -> unop et (fun et' -> Not(et')) CType.Bool
   | Closure.Neg(et) -> unop et (fun et' -> Neg(et')) CType.Int
-  | Closure.And(et1, et2) -> binop et1 et2 (fun et1' et2' -> And(et1', et2')) CType.Bool
-  | Closure.Or (et1, et2) -> binop et1 et2 (fun et1' et2' -> Or (et1', et2')) CType.Bool
-  | Closure.Add(et1, et2) -> binop et1 et2 (fun et1' et2' -> Add(et1', et2')) CType.Int
-  | Closure.Sub(et1, et2) -> binop et1 et2 (fun et1' et2' -> Sub(et1', et2')) CType.Int
-  | Closure.Mul(et1, et2) -> binop et1 et2 (fun et1' et2' -> Mul(et1', et2')) CType.Int
-  | Closure.Div(et1, et2) -> binop et1 et2 (fun et1' et2' -> Div(et1', et2')) CType.Int
-  | Closure.Eq (et1, et2) -> binop et1 et2 (fun et1' et2' -> Eq (et1', et2')) CType.Bool
-  | Closure.LE (et1, et2) -> binop et1 et2 (fun et1' et2' -> LE (et1', et2')) CType.Bool
+  | Closure.And(et1, et2) -> binop et1 et2 (fun (e1', _) (e2', _) -> And(e1', e2')) CType.Bool
+  | Closure.Or (et1, et2) -> binop et1 et2 (fun (e1', _) (e2', _) -> Or (e1', e2')) CType.Bool
+  | Closure.Add(et1, et2) -> binop et1 et2 (fun (e1', _) (e2', _) -> Add(e1', e2')) CType.Int
+  | Closure.Sub(et1, et2) -> binop et1 et2 (fun (e1', _) (e2', _) -> Sub(e1', e2')) CType.Int
+  | Closure.Mul(et1, et2) -> binop et1 et2 (fun (e1', _) (e2', _) -> Mul(e1', e2')) CType.Int
+  | Closure.Div(et1, et2) -> binop et1 et2 (fun (e1', _) (e2', _) -> Div(e1', e2')) CType.Int
+  | Closure.Eq (et1, et2) -> binop et1 et2 (fun (e1', t1') (e2', t2') -> equal_expr (e1', e2') t1') CType.Bool    
+  | Closure.LE (et1, et2) -> binop et1 et2 (fun (e1', _) (e2', _) -> LE (e1', e2')) CType.Bool
   | Closure.Record(xets) -> 
       insert_lets (List.map snd xets) (fun ets' ->
         let xts', xes' = List.fold_left2 (fun (xts', xes') (x, _) (e', t') -> (x, t') :: xts', (x, e') :: xes') ([], []) xets ets' in
@@ -645,13 +724,63 @@ let rec g (venv, tenv as env) ids (e, t) = (* C言語の文生成 (caml2html: c_
       let x' = gentmp ty_f in (* クロージャはトップレベル関数と名前が被っているので改名する *)
       let e2', t2 = g ((M.add x' ty_f venv), tenv) (M.add x x' ids) et2 in
       Seq(Dec((x', ty_f), Some(AppDir(Var(name), Var(l) :: (List.map (fun (y, _) -> Var(y)) yts)))), e2'), t2
+        
+let ref_equal_stm (a, b) =
+  function
+  | CType.Struct(x, Some(CType.RefBase), ["type", CType.Int; "u", CType.Union(yts)]) ->
+      let e, _ = insert_assign_in_if 
+        (If(Eq(FieldArrow(a, "type"), FieldArrow(b, "type")), 
+            List.fold_right (fun (y, t) e ->
+              (If(Eq(FieldArrow(a, "type"), Var(Id.to_upper y)), 
+                  block (Exp(match t with
+                  | CType.Struct(_, _, zts) ->
+                      List.fold_left 
+                        (fun e (z, t) -> 
+                          if CType.is_ref_pointer t then 
+                          (And(e, (AppDir(FieldArrow(Cast(CType.Pointer(CType.RefBase), FieldDot(FieldDot(FieldArrow(a, "u"), y),z)), "ref_equal"), [Cast(CType.Pointer(CType.RefBase), FieldArrow(a, "u." ^ y ^ "." ^ z)); Cast(CType.Pointer(CType.RefBase), FieldArrow(b, "u." ^ y ^ "." ^ z))]))))
+                          else 
+                          (And(e, Eq(FieldArrow(a, "u." ^ y ^ "." ^ z), FieldArrow(b, "u." ^ y ^ "." ^ z)))))
+                        (Bool(true)) zts
+                  | CType.Nothing -> (Bool(true))
+                  | _ -> assert false))
+                    , e)))
+              yts (block (Exp(Bool(false)))), Exp(Bool(false))), CType.Bool) in
+      insert_return (CType.Bool) e
+  | CType.Struct(x, _, ["type", CType.Int; "u", CType.Union(yts)]) ->
+      let e, _ = insert_assign_in_if 
+        (If(Eq(FieldArrow(a, "type"), FieldArrow(b, "type")), 
+            List.fold_right (fun (y, t) e ->
+              (If(Eq(FieldArrow(a, "type"), Var(Id.to_upper y)), 
+                  block (Exp(match t with
+                  | CType.Struct(_, _, zts) ->
+                      List.fold_left 
+                        (fun e (z, t) -> 
+                          if CType.is_ref_pointer t then 
+                          (And(e, (AppDir(FieldArrow(Cast(CType.Pointer(CType.RefBase), FieldDot(FieldDot(FieldArrow(a, "u"), y),z)), "ref_equal"), [Cast(CType.Pointer(CType.RefBase), FieldArrow(a, "u." ^ y ^ "." ^ z)); Cast(CType.Pointer(CType.RefBase), FieldArrow(b, "u." ^ y ^ "." ^ z))]))))
+                          else 
+                          (And(e, Eq(FieldArrow(a, "u." ^ y ^ "." ^ z), FieldArrow(b, "u." ^ y ^ "." ^ z)))))
+                        (Bool(true)) zts
+                  | CType.Nothing -> (Bool(true))
+                  | _ -> assert false))
+                    , e)))
+              yts (block (Exp(Bool(false)))), Exp(Bool(false))), CType.Bool) in
+      insert_return (CType.Bool) e (* TBD: Almost the same as above *)
+  | CType.Struct(_, _, xts) -> 
+      Return(List.fold_right 
+            (fun (x, t) e -> 
+              if CType.is_ref_pointer t then 
+              (And(e, AppDir(FieldArrow(FieldDot(a, x), "ref_equal"), [FieldDot(a, x); FieldDot(b, x)]))) 
+              else 
+              (And(e, Eq(FieldArrow(a, x), FieldArrow(b, x))))) xts (Bool(true)))
+  | CType.Enum _ -> Return(Eq(Deref(a), Deref(b)))
+  | t -> Printf.eprintf "invalid type : %s\n" (CType.string_of_t t); assert false
 
 let destructor =
   function
   | CType.Struct(x, Some(CType.RefBase), ["type", CType.Int; "u", CType.Union(yts)]) as t ->
       let pt = CType.Pointer(CType.NameTy(x, { contents = Some(t) })) in
       [FunDef({ name = Id.L("destruct_" ^ x);
-                args = [("base", CType.Pointer(CType.NameTy("ref_base_t", { contents = None })))];
+                args = [("base", CType.ref_base_ptr)];
                 body = (let p = "p" in
                         let dec = VarDec((p, pt), Some(Cast(pt, Var("base")))) in
                         let s = List.fold_left 
@@ -671,7 +800,7 @@ let destructor =
   | CType.Struct(x, Some(CType.RefBase), yts) as t ->
       let pt = CType.Pointer(CType.NameTy(x, { contents = Some(t) })) in
       [FunDef({ name = Id.L("destruct_" ^ x);
-                args = [("base", CType.Pointer(CType.NameTy("ref_base_t", { contents = None })))];
+                args = [("base", CType.ref_base_ptr)];
                 body = (let p = "p" in
                         let dec = VarDec((p, pt), Some(Cast(pt, Var("base")))) in
                         let s = List.fold_left 
@@ -695,7 +824,7 @@ let constructors =
                FunDef({ name = Id.L(y);
                         args = zts';
                         body = (let p = "p" in
-                                let dec = (VarDec((p, pt), Some(Cast(pt, AppDir(Var("new_ref_base"), [Sizeof(t); Var("destruct_" ^ x)]))))) in
+                                let dec = (VarDec((p, pt), Some(Cast(pt, AppDir(Var("new_ref_base"), [Sizeof(t); Var("destruct_" ^ x); Var("ref_equal_" ^ x)]))))) in
                                 let seq = (List.fold_left2 (fun s (z, t) (z', _) -> 
                                   (Seq(s, (assign (FieldArrow(Var(p), "u." ^ y ^ "." ^ z), t) (Var(z')))))) (Assign(FieldArrow(Var(p), "type"), Var(Id.to_upper y))) zts zts') in
                                 Block([dec], (Seq(seq, Return(Var(p))))));
@@ -706,7 +835,7 @@ let constructors =
                FunDef({ name = Id.L(y);
                         args = [];
                         body = (let p = "p" in
-                                let dec = (VarDec((p, pt), Some(Cast(pt, AppDir(Var("new_ref_base"), [Sizeof(t); Var("destruct_" ^ x)]))))) in
+                                let dec = (VarDec((p, pt), Some(Cast(pt, AppDir(Var("new_ref_base"), [Sizeof(t); Var("destruct_" ^ x); Var("ref_equal_" ^ x)]))))) in
                                 let seq = Assign(FieldArrow(Var(p), "type"), Var(Id.to_upper y)) in
                                 Block([dec], (Seq(seq, Return(Var(p))))));                                    
                         ret = pt; }, ref true) :: defs)
@@ -757,10 +886,14 @@ let h (venv, tenv) def = (* トップレベル定義の C 言語変換 (caml2htm
       (M.add x (translate_type tenv t) venv), tenv
   | Closure.TypeDef(x, t) -> 
       let t' = translate_tycon tenv t in
+      let equal = equal_fun (CType.NameTy(x, { contents = Some(t') })) in
+      let ref_equal = ref_equal_fun (CType.NameTy(x, { contents = Some(t') })) in
       let destr = destructor t' in
       let constrs, constr_defs = constructors t' in
-      let def = TypeDef((x, t'), ref false) in
+      let def = TypeDef((x, t'), ref true (* TBD *)) in
       toplevel := def :: !toplevel;
+      toplevel := equal :: !toplevel;
+      toplevel := ref_equal :: !toplevel;
       toplevel := List.rev_append destr !toplevel;
       toplevel := List.rev_append constr_defs !toplevel;
       (M.add_list constrs venv), (M.add x (CType.NameTy(x, { contents = Some(t') })) tenv)

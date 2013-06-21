@@ -3,7 +3,8 @@ open C
 let prec = 
   function
   | Nop | Bool _ | Int _ | Struct _ | Var _ 
-  | AppCls _ | AppDir _ | FieldDot _  | FieldArrow _  | Sizeof _ | Ref _ | Deref _ | Cast _ -> 9
+  | AppCls _ | AppDir _ | FieldDot _  | FieldArrow _  | Sizeof _ | Ref _ | Deref _ -> 10
+  | Cast _ -> 9
   | Not _ | Neg _ -> 8
   | Mul _ | Div _ -> 7
   | Add _ | Sub _  -> 6
