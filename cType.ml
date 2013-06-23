@@ -49,24 +49,10 @@ let is_ref_pointer =
   | Pointer(t) -> is_ref_base t
   | Void | Int | Bool | Enum _ | Fun _ | Union _ | Nothing | Struct _ | NameTy _ | RefBase -> false
 
-let rec is_pointer =
-  function
-  | Box | Pointer _ -> true
-  | Void | Int | Bool | Enum _ | Fun _ | Union _ | Nothing | Struct _ | RefBase -> false
-  | NameTy(_, { contents = Some(t) }) -> is_pointer t
-  | NameTy(_, { contents = None }) -> assert false
-
-let rec deref =
-  function
-  | Box -> RefBase
-  | Pointer t -> t
-  | NameTy(_, { contents = Some(t) }) -> deref t
-  | Void | Int | Bool | Enum _ | Fun _ | Union _ | Nothing | Struct _ | RefBase 
-  | NameTy(_, { contents = None }) -> assert false
-
 let rec has_equal =
   function
-  | Box | Struct _ | RefBase -> true
+  | Struct _ -> true
+  | Box  | RefBase 
   | Void | Int | Bool | Enum _ | Fun _ | Union _ | Nothing -> false
   | Pointer(t) | NameTy(_, { contents = Some(t) }) -> has_equal t
   | NameTy(_, { contents = None }) -> assert false
