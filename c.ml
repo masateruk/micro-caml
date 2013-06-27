@@ -314,7 +314,7 @@ let equal_fun ty =
   FunDef({ name = Id.L(equal ty);
            args = [(a, ptr); (b, ptr)];
            body = block (equal_stm (Var(a), Var(b)) ptr);
-           ret = CType.Bool }, ref true)
+           ret = CType.Bool }, ref false)
     
 let equal_ref ty = "equal_ref_" ^ (string_of_type ty)
   
@@ -331,7 +331,7 @@ let equal_ref_fun ty =
                               VarDec((b, ptr), Some(cast ptr (Var(pb))))] in
                    let s = Return(equal_expr (Var(a), Var(b)) ptr) in
                    (Block(dec, s)));
-           ret = CType.Bool }, ref true)
+           ret = CType.Bool }, ref false)
     
 let wrap_body x t = 
   if CType.is_ref_pointer t then (Exp(Cast(CType.Box, Var(x))))
@@ -379,7 +379,7 @@ let name_ty ty =
   try find_name_ty ty with
   | Not_found ->
       let name = (gentmp ty) ^ "_t" in
-      toplevel := TypeDef((name, ty), ref true (* TBD *)) :: !toplevel;
+      toplevel := TypeDef((name, ty), ref false) :: !toplevel;
       let ty = CType.NameTy(name, { contents = Some(ty) }) in
       toplevel := (equal_fun ty) :: !toplevel;
       toplevel := (equal_ref_fun ty) :: !toplevel;
@@ -489,7 +489,7 @@ let make_closure ty fvs =
             let args = List.map (fun t -> (gentmp t, t)) fun_args in
             ("base", CType.Pointer(ty_f)) :: args, 
             Block([dec], Return(AppDir(FieldArrow(Var(var), "pfn"), (List.map (fun (x, t) -> FieldArrow(Var(var), x)) fvs) @ (List.map (fun (x, _) -> Var(x)) args)))) in
-          FunDef({ name = Id.L(name); args = args; body = body; ret = ty_r }, ref true) in
+          FunDef({ name = Id.L(name); args = args; body = body; ret = ty_r }, ref false) in
         
         let closure_equal ty_c = equal_fun ty_c in
         let closure_equal_ref ty_c = equal_ref_fun ty_c in
@@ -501,7 +501,9 @@ let make_closure ty fvs =
                      let release_fields = List.fold_right (fun (x, t) s -> 
                        if CType.is_ref_pointer t then (Seq(s, Exp(AppDir(Var("release"), [FieldArrow(Var(p), x)])))) else s) fvs (Exp(Nop)) 
                      in
-                     Block([dec], release_fields) in
+                     match release_fields with
+                     | Exp(Nop) -> Block([], Exp(Nop))
+                     | s -> Block([dec], s) in
           FunDef({ name = Id.L("destruct_" ^ (string_of_type ty_c)); args = args; body = body; ret = CType.Void }, ref false) in
         
         let closure_constructor apply ty_c =
@@ -831,7 +833,7 @@ let h (venv, tenv) def = (* トップレベル定義の C 言語変換 (caml2htm
   | Closure.TypeDef(x, t) -> 
       let t' = translate_tycon tenv t in
       
-      let def = TypeDef((x, t'), ref true (* TBD *)) in
+      let def = TypeDef((x, t'), ref false) in
       toplevel := def :: !toplevel;
       
       if CType.has_equal t' then
