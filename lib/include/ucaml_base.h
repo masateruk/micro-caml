@@ -10,7 +10,10 @@
 
 #include <gc.h>
 #define D_MALLOC(size) GC_malloc(size)
-#define D_FREE(p)
+#define D_FREE(p) 
+
+#define debug_malloc(size, file, line) GC_malloc(size)
+#define debug_free(p)
 
 #else
 
@@ -102,8 +105,10 @@ typedef ref_base_t* sp_t;
 
 static inline void delete_box(sp_t p)
 {
+#if !(USE_GC)
     box_t* b = (box_t*)p;
     D_FREE(b->p);
+#endif
 }
 
 static inline sp_t new_box(int size, bool (*ref_equal)(ref_base_t*, ref_base_t*))
