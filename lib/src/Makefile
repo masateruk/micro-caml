@@ -20,7 +20,7 @@ MAJOR = 0
 MINOR = 0
 
 CC = gcc
-CFLAGS = -g -Wall -I../include
+CFLAGS = -g -Wall -fPIC -I../include
 TRASH = *.o *.so *.dylib
 
 all:$(RESULT)
