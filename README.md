@@ -26,7 +26,4 @@ The name of this program is uCaml that is called microCaml.
 
  $ make 
 
- OCaml 3.12 is required.
-
-
-
+ OCaml 3.12 or later is required.

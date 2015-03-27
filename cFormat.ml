@@ -13,7 +13,7 @@ let prec =
   | And _ -> 3
   | Or _ -> 2
   | Cond _ -> 1
-  | Comma _ -> 0
+  | Comma -> 0
   | Let _ -> assert false
   
 let indent depth = String.make (depth * 4) ' '

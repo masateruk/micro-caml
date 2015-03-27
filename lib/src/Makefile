@@ -4,7 +4,7 @@ ifeq ($(UNAME), Darwin)
   SHLIB_EXT = dylib
   SHLIB_FLAGS = -dynamiclib -fPIC
 else
-  SHLIB_FLAGS = -shared 
+  SHLIB_FLAGS = -shared -fPIC
   ifeq ($(UNAME), CYGWIN_NT-6.1-WOW64)
     SHLIB_EXT = dll
   else
@@ -20,7 +20,7 @@ MAJOR = 0
 MINOR = 0
 
 CC = gcc
-CFLAGS = -g -Wall -I../include
+CFLAGS = -g -Wall -fPIC -I../include
 TRASH = *.o *.so *.dylib
 
 all:$(RESULT)
